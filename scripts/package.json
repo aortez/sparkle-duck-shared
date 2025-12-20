@@ -1,0 +1,20 @@
+{
+  "name": "@sparkle-duck/flash-utils",
+  "version": "0.1.0",
+  "description": "Shared flash script utilities for Sparkle Duck family projects",
+  "type": "module",
+  "exports": {
+    ".": "./lib/index.mjs",
+    "./lib/*": "./lib/*"
+  },
+  "files": [
+    "lib/"
+  ],
+  "keywords": [
+    "raspberry-pi",
+    "yocto",
+    "flash",
+    "embedded"
+  ],
+  "license": "SEE LICENSE IN ../LICENSE"
+}

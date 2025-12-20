@@ -42,6 +42,19 @@ scripts/lib/
 └── wifi-utils.mjs               # WiFi credential generation and injection
 ```
 
+## pi-base-image.bbclass
+
+The recommended way to integrate. Inherit this class in your image recipe:
+
+```bitbake
+inherit pi-base-image
+BOOT_DEVICE = "mmcblk0"  # Required: "mmcblk0" for SD, "sda" for USB
+HOSTNAME_DEFAULT = "mydevice"
+IMAGE_INSTALL:append = " my-app"
+```
+
+Provides: systemd, SSH, ab-boot-manager, persistent-data, hostname-setup, NetworkManager, avahi, and base utilities.
+
 ## Yocto Recipes
 
 ### ab-boot-manager

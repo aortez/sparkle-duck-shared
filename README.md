@@ -13,22 +13,38 @@ Shared Yocto build infrastructure and flash utilities for Raspberry Pi projects 
 
 ## Projects Using This
 
-- [Inky Soup](https://github.com/yourorg/inky-soup) - Web-based e-ink display system for Pimoroni Inky Impression
-- [Sparkle Duck (Dirt Sim)](https://github.com/yourorg/sparkle-duck) - Flight simulator display system
+- [Inky Soup](https://github.com/yourorg/inky-soup) - Web-based e-ink display system
+- [Sparkle Duck (Dirt Sim)](https://github.com/yourorg/sparkle-duck) - Dirt simulation
 
 ## Structure
 
 ```
 sparkle-duck-shared/
 ├── yocto/
-│   └── meta-pi-base/          # Shared Yocto layer
-│       ├── wic/               # Partition layouts
-│       ├── recipes-support/   # Infrastructure packages
-│       └── classes/           # Common image configuration
+│   └── meta-pi-base/              # Shared Yocto layer
+│       ├── conf/layer.conf        # Layer configuration
+│       ├── wic/sdimage-ab.wks.in  # Parameterized A/B partition layout
+│       └── recipes-support/
+│           ├── ab-boot/           # A/B boot slot manager
+│           ├── persistent-data/   # /data partition mount
+│           └── hostname-setup/    # Hostname from /boot/hostname.txt
 ├── scripts/
-│   └── lib/                   # Shared flash script utilities
-└── docs/                      # Integration guides
+│   └── lib/                       # Shared flash script utilities (ES modules)
+└── docs/                          # Integration guides
 ```
+
+## Yocto Recipes
+
+### ab-boot-manager
+Manages A/B boot partitions for safe OTA updates:
+- `ab-boot-manager status` - Show current/inactive slots
+- `ab-update <rootfs.ext4.gz>` - Flash to inactive slot and switch boot
+
+### persistent-data
+Mounts `/data` partition and bind-mounts NetworkManager connections so WiFi credentials persist across updates.
+
+### hostname-setup
+Sets hostname from `/boot/hostname.txt` at boot time.
 
 ## Integration
 
@@ -52,9 +68,5 @@ For commercial licensing inquiries: [Open an issue](https://github.com/aortez/sp
 
 ## Development Status
 
-**Current:** Planning phase
-**Next:** Extract common code from inky-soup and sparkle-duck
-
-## Contributing
-
-This is currently a private infrastructure project. Contributions are not being accepted at this time.
+**Current:** Initial extraction complete - A/B boot, persistent data, flash utilities
+**Next:** Integration testing with inky-soup and sparkle-duck

@@ -1,0 +1,16 @@
+# A/B partition layout for safe remote updates.
+# Each rootfs gets its own partition - system updates the inactive one.
+# Data partition persists across updates (WiFi credentials, logs, config).
+#
+# Required variables (set in your image recipe or local.conf):
+#   BOOT_DEVICE - "sda" for USB boot (Pi 5), "mmcblk0" for SD card (Pi Zero 2W, etc.)
+#
+# Optional variables:
+#   BOOT_SIZE   - Boot partition size in MB (default: 150)
+#   ROOTFS_SIZE - Root filesystem size in MB (default: 800)
+#   DATA_SIZE   - Persistent data partition size in MB (default: 100)
+
+part /boot --source bootimg-partition --ondisk ${BOOT_DEVICE} --fstype=vfat --label boot --active --align 4096 --size ${BOOT_SIZE}
+part / --source rootfs --ondisk ${BOOT_DEVICE} --fstype=ext4 --label rootfs_a --align 4096 --size ${ROOTFS_SIZE}
+part --ondisk ${BOOT_DEVICE} --fstype=ext4 --label rootfs_b --align 4096 --size ${ROOTFS_SIZE}
+part /data --ondisk ${BOOT_DEVICE} --fstype=ext4 --label data --align 4096 --size ${DATA_SIZE}

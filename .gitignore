@@ -3,6 +3,9 @@ node_modules/
 package-lock.json
 *.log
 
+# Secrets (wifi-creds.local.example is safe to commit)
+wifi-creds.local
+
 # Editor
 .vscode/
 .idea/

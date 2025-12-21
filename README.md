@@ -46,6 +46,32 @@ Mounts `/data` partition and bind-mounts NetworkManager connections so WiFi cred
 ### hostname-setup
 Sets hostname from `/boot/hostname.txt` at boot time.
 
+## WiFi Credential Injection
+
+The flash script can inject WiFi credentials at flash time so your Pi connects on first boot.
+
+**Option 1: File-based (recommended for automation)**
+
+Copy the example file and edit with your credentials:
+```bash
+cp wifi-creds.local.example wifi-creds.local
+# Edit wifi-creds.local with your SSID and password
+```
+
+The file is JSON format:
+```json
+{
+  "ssid": "MyNetworkName",
+  "password": "MySecretPassword"
+}
+```
+
+**Option 2: Interactive prompt**
+
+If no `wifi-creds.local` file exists, the flash script prompts for credentials interactively.
+
+**Note:** `wifi-creds.local` is gitignored to prevent committing secrets.
+
 ## Integration
 
 Add as a git submodule to your project:

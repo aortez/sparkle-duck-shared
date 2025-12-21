@@ -12,6 +12,18 @@
  *     hasDataPartition, backupDataPartition, restoreDataPartition, cleanupBackup, setHostname,
  *     getBlockDevices, findLatestImage, hasBmaptool, flashImage, displayDevices, selectDevice,
  *   } from 'sparkle-duck-shared/scripts/lib/index.mjs';
+ *
+ * Usage in your project's yolo-update.mjs:
+ *
+ *   import {
+ *     setupConsolaLogging, banner, skull,
+ *     run, runCapture,
+ *     ssh, sshRun, checkRemoteReachable, transferImage, waitForReboot,
+ *     getRemoteTmpSpace, getRemoteBootDevice, getRemoteBootTime, verifyRemoteChecksum,
+ *     calculateChecksum, prepareRootfs, remoteFlash, cleanupPreparedImage,
+ *     createCleanupManager,
+ *     loadConfig,
+ *   } from '../path/to/pi-base/scripts/lib/index.mjs';
  */
 
 // CLI utilities.
@@ -25,6 +37,9 @@ export {
   prompt,
   formatBytes,
   TEMP_PREFIX,
+  setupConsolaLogging,
+  banner,
+  skull,
 } from './cli-utils.mjs';
 
 // Config utilities.
@@ -67,3 +82,35 @@ export {
   getWifiCredentials,
   injectWifiCredentials,
 } from './wifi-utils.mjs';
+
+// Command utilities.
+export {
+  run,
+  runCapture,
+} from './command-utils.mjs';
+
+// Cleanup utilities.
+export {
+  createCleanupManager,
+} from './cleanup-utils.mjs';
+
+// Remote utilities.
+export {
+  ssh,
+  sshRun,
+  checkRemoteReachable,
+  getRemoteTmpSpace,
+  getRemoteBootDevice,
+  getRemoteBootTime,
+  waitForReboot,
+  transferImage,
+  verifyRemoteChecksum,
+} from './remote-utils.mjs';
+
+// Rootfs utilities.
+export {
+  calculateChecksum,
+  prepareRootfs,
+  cleanupPreparedImage,
+  remoteFlash,
+} from './rootfs-utils.mjs';

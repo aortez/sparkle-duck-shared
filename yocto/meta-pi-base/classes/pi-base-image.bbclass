@@ -59,6 +59,11 @@ IMAGE_INSTALL:append = " \
     networkmanager-nmcli \
 "
 
+# Time synchronization.
+IMAGE_INSTALL:append = " \
+    systemd-timesyncd \
+"
+
 # Service discovery (mDNS).
 IMAGE_INSTALL:append = " \
     avahi-daemon \

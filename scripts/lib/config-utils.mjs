@@ -10,6 +10,13 @@ import { warn } from './cli-utils.mjs';
  * Load flash configuration from a JSON file.
  * @param {string} configPath - Path to the config file.
  * @returns {object|null} The config object, or null if invalid/missing.
+ *
+ * Supported fields:
+ *   - ssh_key_path (string, required): Path to SSH public key.
+ *   - device (string, optional): Device path (e.g., "/dev/sdb").
+ *   - hostname (string, optional): Target device hostname.
+ *   - backup_data (boolean, optional): Auto-backup data partition.
+ *   - skip_confirmation (boolean, optional): Skip final flash confirmation.
  */
 export function loadConfig(configPath) {
   try {

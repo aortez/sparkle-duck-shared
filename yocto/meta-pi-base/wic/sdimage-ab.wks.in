@@ -10,7 +10,7 @@
 #   ROOTFS_SIZE - Root filesystem size in MB (default: 800)
 #   DATA_SIZE   - Persistent data partition size in MB (default: 100)
 
-part /boot --source bootimg-partition --ondisk ${BOOT_DEVICE} --fstype=vfat --label boot --active --align 4096 --size ${BOOT_SIZE}
-part / --source rootfs --ondisk ${BOOT_DEVICE} --fstype=ext4 --label rootfs_a --align 4096 --size ${ROOTFS_SIZE}
-part --ondisk ${BOOT_DEVICE} --fstype=ext4 --label rootfs_b --align 4096 --size ${ROOTFS_SIZE}
-part /data --ondisk ${BOOT_DEVICE} --fstype=ext4 --label data --align 4096 --size ${DATA_SIZE}
+part /boot --source bootimg-partition --ondisk ${BOOT_DEVICE} --fstype=vfat --label boot --active --align 4096 --fixed-size ${BOOT_SIZE}
+part / --source rootfs --ondisk ${BOOT_DEVICE} --fstype=ext4 --label rootfs_a --align 4096 --fixed-size ${ROOTFS_SIZE}
+part --ondisk ${BOOT_DEVICE} --fstype=ext4 --label rootfs_b --align 4096 --fixed-size ${ROOTFS_SIZE}
+part /data --ondisk ${BOOT_DEVICE} --fstype=ext4 --label data --align 4096 --fixed-size ${DATA_SIZE}

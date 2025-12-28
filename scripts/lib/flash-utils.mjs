@@ -11,11 +11,12 @@ import { colors, log, info, warn, error, prompt } from './cli-utils.mjs';
 /**
  * Get list of block devices suitable for flashing.
  * Returns removable devices and excludes the system disk.
- * @returns {Array<{device: string, size: string, model: string, transport: string, removable: boolean}>}
+ * @returns {Array<{device: string, size: string, sizeBytes: number, model: string, serial: string|null, transport: string, removable: boolean}>}
  */
 export function getBlockDevices() {
   try {
-    const output = execSync('lsblk -d -o NAME,SIZE,TYPE,RM,TRAN,MODEL -J', {
+    // Use -b for size in bytes, include SERIAL for device identification.
+    const output = execSync('lsblk -d -b -o NAME,SIZE,TYPE,RM,TRAN,MODEL,SERIAL -J', {
       encoding: 'utf-8',
     });
     const data = JSON.parse(output);
@@ -33,8 +34,10 @@ export function getBlockDevices() {
       })
       .map(dev => ({
         device: `/dev/${dev.name}`,
-        size: dev.size,
+        size: formatBytesCompact(dev.size),
+        sizeBytes: dev.size,
         model: dev.model || 'Unknown',
+        serial: dev.serial || null,
         transport: dev.tran || 'unknown',
         removable: dev.rm === true || dev.rm === '1',
       }));
@@ -42,6 +45,63 @@ export function getBlockDevices() {
     error(`Failed to list block devices: ${err.message}`);
     return [];
   }
+}
+
+/**
+ * Format bytes to human-readable size (compact, like lsblk default).
+ * @param {number} bytes - Size in bytes.
+ * @returns {string} Formatted size string.
+ */
+function formatBytesCompact(bytes) {
+  if (bytes === 0) return '0B';
+  const units = ['B', 'K', 'M', 'G', 'T'];
+  // Use 1000 base like lsblk default (not 1024).
+  const i = Math.floor(Math.log(bytes) / Math.log(1000));
+  const size = bytes / Math.pow(1000, i);
+  // Show one decimal place for values >= 10, none for smaller.
+  return size >= 10 ? `${Math.round(size)}${units[i]}` : `${size.toFixed(1)}${units[i]}`;
+}
+
+/**
+ * Validate a device against stored config values.
+ * Checks serial number to ensure the same physical device is at the expected path.
+ * @param {object} device - Device object from getBlockDevices().
+ * @param {object} config - Config object with device_serial field.
+ * @returns {{valid: boolean, reason: string|null}} Validation result.
+ */
+export function validateDeviceIdentity(device, config) {
+  // No stored serial means first use - always valid.
+  if (!config.device_serial) {
+    return { valid: true, reason: null };
+  }
+
+  // Device has no serial - can't validate, but warn.
+  if (!device.serial) {
+    return {
+      valid: false,
+      reason: 'Device has no serial number (cannot verify identity)',
+    };
+  }
+
+  // Serial mismatch - different physical device at this path.
+  if (device.serial !== config.device_serial) {
+    return {
+      valid: false,
+      reason: `Serial mismatch: expected "${config.device_serial}", got "${device.serial}"`,
+    };
+  }
+
+  return { valid: true, reason: null };
+}
+
+/**
+ * Check if a device is considered "large" (> 200GB) and needs extra confirmation.
+ * @param {object} device - Device object from getBlockDevices().
+ * @returns {boolean} True if device is larger than 200GB.
+ */
+export function isLargeDevice(device) {
+  const threshold = 200 * 1000 * 1000 * 1000; // 200 GB in bytes.
+  return device.sizeBytes > threshold;
 }
 
 /**

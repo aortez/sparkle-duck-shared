@@ -73,6 +73,8 @@ export {
   flashImage,
   displayDevices,
   selectDevice,
+  validateDeviceIdentity,
+  isLargeDevice,
 } from './flash-utils.mjs';
 
 // WiFi utilities.

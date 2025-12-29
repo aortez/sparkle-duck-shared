@@ -59,11 +59,6 @@ IMAGE_INSTALL:append = " \
     networkmanager-nmcli \
 "
 
-# Time synchronization.
-IMAGE_INSTALL:append = " \
-    systemd-timesyncd \
-"
-
 # Service discovery (mDNS).
 IMAGE_INSTALL:append = " \
     avahi-daemon \
@@ -88,6 +83,16 @@ IMAGE_INSTALL:append = " \
     nano \
     htop \
 "
+
+# Disable systemd-networkd since we use NetworkManager exclusively.
+# Having both enabled causes systemd-networkd-wait-online to timeout (120s)
+# waiting for interfaces that NetworkManager manages, delaying boot.
+disable_systemd_networkd() {
+    ln -sf /dev/null ${IMAGE_ROOTFS}/etc/systemd/system/systemd-networkd.service
+    ln -sf /dev/null ${IMAGE_ROOTFS}/etc/systemd/system/systemd-networkd.socket
+    ln -sf /dev/null ${IMAGE_ROOTFS}/etc/systemd/system/systemd-networkd-wait-online.service
+}
+ROOTFS_POSTPROCESS_COMMAND:append = " disable_systemd_networkd;"
 
 # Mark initial boot slot.
 setup_ab_boot() {

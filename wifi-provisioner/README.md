@@ -1,6 +1,6 @@
 # WiFi Provisioner
 
-**Status: WIP - Phase 1-5 complete, ready for Pi testing**
+**Status: Phase 1-5 complete, tested end-to-end on Pi**
 
 A lightweight Bluetooth LE daemon for WiFi provisioning on Raspberry Pi. Implements the [Improv WiFi](https://www.improv-wifi.com/) protocol, allowing users to configure WiFi credentials from their phone without needing physical access to the device.
 
@@ -246,12 +246,16 @@ For broader device support (iOS, non-Chrome browsers), a future enhancement coul
 - [ ] **End-to-end test:** Web Bluetooth demo connects and provisions (manual)
 
 ### Phase 5: Yocto Packaging
-- [x] Create recipe for wifi-provisioner
-- [x] systemd service file
-- [x] Add to pi-base-image.bbclass
-- [ ] **Integration test:** Service starts on boot — requires Pi
-- [ ] **Integration test:** Service auto-advertises when WiFi disconnected — requires Pi
-- [ ] Test in dirtsim and inky-soup images
+- [x] Create recipe for wifi-provisioner (with 141 crate dependencies)
+- [x] systemd service file with security hardening
+- [x] Add to pi-base-image.bbclass (includes bluez5 + wifi-provisioner)
+- [x] Refactor dirtsim-image to inherit pi-base-image (-71 lines, removed duplication)
+- [x] Fix systemd-timesyncd issue (built into systemd, not separate package)
+- [x] **Integration test:** Service starts on boot
+- [x] **Integration test:** Service auto-advertises when WiFi disconnected
+- [x] **End-to-end test:** Web Bluetooth from phone → provision WiFi → Pi connected
+- [x] Test in dirtsim image (Pi 5 with HyperPixel display)
+- [x] Fix Identify command to send acknowledgment response
 
 ### Phase 6: Web Setup Page
 - [ ] Create wifi.html page using Improv WiFi JS SDK
@@ -424,6 +428,34 @@ INFO wifi_provisioner::ble: GATT application registered
 INFO wifi_provisioner::ble: BLE advertising started as 'YourHostname'
 INFO wifi_provisioner::ble: BLE server running, waiting for connections...
 ```
+
+### End-to-End Test Results (Dec 2025)
+
+**Platform:** Raspberry Pi 5 running dirtsim-image (Yocto Scarthgap)
+
+**Test:**
+1. Pi booted without WiFi credentials
+2. wifi-provisioner auto-started BLE advertising
+3. Connected from Android phone via https://www.improv-wifi.com/
+4. Device appeared as "dirtsim2" in Bluetooth picker
+5. Entered WiFi credentials (SSID + password)
+6. Pi successfully connected to WiFi network
+
+**Logs from successful provisioning:**
+```
+Dec 29 07:29:07 - Processing RPC command: SendWifiSettings
+Dec 29 07:29:07 - Attempting to connect to WiFi: onionchan
+Dec 29 07:29:11 - Successfully connected to onionchan
+Dec 29 07:29:11 - Provisioning complete! Redirect URL: http://dirtsim2.local:8081
+```
+
+**Verified:**
+- ✅ BLE GATT server (Improv UUID `00467768-6228-2272-4663-277478268000` registered)
+- ✅ Web Bluetooth connection from phone
+- ✅ Identify command (sends acknowledgment)
+- ✅ SendWifiSettings command (provisions NetworkManager)
+- ✅ Redirect URL sent after success
+- ✅ systemd service integration (auto-enabled, starts on boot)
 
 ## Compatible Clients
 

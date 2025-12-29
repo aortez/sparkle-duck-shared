@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "BLE daemon for WiFi provisioning using Improv WiFi protocol"
 license = "MIT"
+repository = "https://github.com/aortez/sparkle-duck-shared"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "macros", "time", "process"] }

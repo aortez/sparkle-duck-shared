@@ -7,10 +7,13 @@ use std::time::Duration;
 
 use bluer::adv::Advertisement;
 use bluer::gatt::local::{
-    Application, Characteristic, CharacteristicNotify, CharacteristicNotifyMethod,
+    characteristic_control, Application, Characteristic, CharacteristicControl,
+    CharacteristicControlEvent, CharacteristicNotify, CharacteristicNotifyMethod,
     CharacteristicRead, CharacteristicWrite, CharacteristicWriteMethod, Service,
 };
+use bluer::gatt::CharacteristicWriter;
 use bluer::{Adapter, Session};
+use futures_util::StreamExt;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info, warn};
 
@@ -56,6 +59,8 @@ pub struct BleState {
     pub rpc_result: Vec<u8>,
     /// Whether advertising is active.
     pub advertising: bool,
+    /// Active RPC result writer for sending notifications to subscribed clients.
+    pub rpc_result_notifier: Option<CharacteristicWriter>,
 }
 
 impl Default for BleState {
@@ -66,6 +71,7 @@ impl Default for BleState {
             error_state: ImprovError::None,
             rpc_result: Vec::new(),
             advertising: false,
+            rpc_result_notifier: None,
         }
     }
 }
@@ -136,7 +142,7 @@ impl<W: WifiManager + 'static> BleManager<W> {
         adapter.set_alias(self.config.device_name.clone()).await?;
 
         // Build and register the GATT application.
-        let app = self.build_gatt_application().await;
+        let (app, rpc_result_control) = self.build_gatt_application().await;
         let _app_handle = adapter.serve_gatt_application(app).await?;
 
         info!("GATT application registered");
@@ -144,8 +150,25 @@ impl<W: WifiManager + 'static> BleManager<W> {
         // Start advertising.
         self.start_advertising(&adapter).await?;
 
+        // Spawn task to handle RPC result notification subscriptions.
+        let state_for_notify = Arc::clone(&self.state);
+        tokio::spawn(async move {
+            let mut control = rpc_result_control;
+            while let Some(event) = control.next().await {
+                match event {
+                    CharacteristicControlEvent::Notify(writer) => {
+                        info!("Client subscribed to RPC result notifications");
+                        let mut s = state_for_notify.write().await;
+                        s.rpc_result_notifier = Some(writer);
+                    }
+                    CharacteristicControlEvent::Write(_) => {
+                        // RPC Result is read-only, ignore writes.
+                    }
+                }
+            }
+        });
+
         // Keep the application running.
-        // In a real application, this would be coordinated with the main loop.
         info!("BLE server running, waiting for connections...");
 
         // Wait forever (the handles keep things alive).
@@ -189,7 +212,10 @@ impl<W: WifiManager + 'static> BleManager<W> {
     }
 
     /// Build the GATT application with Improv WiFi service.
-    async fn build_gatt_application(&self) -> Application {
+    ///
+    /// Returns the application and a control handle for the RPC Result characteristic
+    /// (used to receive notification subscription events).
+    async fn build_gatt_application(&self) -> (Application, CharacteristicControl) {
         let state = Arc::clone(&self.state);
         let config = self.config.clone();
         let wifi = Arc::clone(&self.wifi);
@@ -237,7 +263,7 @@ impl<W: WifiManager + 'static> BleManager<W> {
             ..Default::default()
         };
 
-        // RPC Result characteristic - read only.
+        // RPC Result characteristic - read + notify (IO-based for push notifications).
         let state_for_result = Arc::clone(&state);
         let rpc_result_read = CharacteristicRead {
             read: true,
@@ -250,6 +276,9 @@ impl<W: WifiManager + 'static> BleManager<W> {
             }),
             ..Default::default()
         };
+
+        // Create control handle for RPC Result notifications.
+        let (rpc_result_control, rpc_result_handle) = characteristic_control();
 
         // RPC Command characteristic - write only.
         let state_for_cmd = Arc::clone(&state);
@@ -273,7 +302,7 @@ impl<W: WifiManager + 'static> BleManager<W> {
             ..Default::default()
         };
 
-        Application {
+        let app = Application {
             services: vec![Service {
                 uuid: SERVICE_UUID,
                 primary: true,
@@ -316,15 +345,14 @@ impl<W: WifiManager + 'static> BleManager<W> {
                         write: Some(rpc_command_write),
                         ..Default::default()
                     },
-                    // RPC Result (read + notify).
+                    // RPC Result (read + notify via IO for push notifications).
                     Characteristic {
                         uuid: characteristic::RPC_RESULT,
                         read: Some(rpc_result_read),
+                        control_handle: rpc_result_handle,
                         notify: Some(CharacteristicNotify {
                             notify: true,
-                            method: CharacteristicNotifyMethod::Fun(Box::new(|_| {
-                                Box::pin(async {})
-                            })),
+                            method: CharacteristicNotifyMethod::Io,
                             ..Default::default()
                         }),
                         ..Default::default()
@@ -333,7 +361,9 @@ impl<W: WifiManager + 'static> BleManager<W> {
                 ..Default::default()
             }],
             ..Default::default()
-        }
+        };
+
+        (app, rpc_result_control)
     }
 }
 
@@ -345,6 +375,17 @@ impl BleConfig {
             firmware_version: self.firmware_version.clone(),
             hardware_type: self.hardware_type.clone(),
             redirect_url: self.redirect_url.clone(),
+        }
+    }
+}
+
+/// Send an RPC result notification to the subscribed client.
+async fn send_rpc_notification(state: &Arc<RwLock<BleState>>, response: &[u8]) {
+    let mut s = state.write().await;
+    if let Some(ref mut writer) = s.rpc_result_notifier {
+        debug!("Sending RPC result notification ({} bytes)", response.len());
+        if let Err(e) = writer.send(response).await {
+            warn!("Failed to send RPC result notification: {}", e);
         }
     }
 }
@@ -379,8 +420,11 @@ async fn handle_rpc_command<W: WifiManager>(
 
             // Send empty response to acknowledge.
             let response = build_response(RpcCommand::Identify, &[]);
-            let mut s = state.write().await;
-            s.rpc_result = response;
+            {
+                let mut s = state.write().await;
+                s.rpc_result = response.clone();
+            }
+            send_rpc_notification(&state, &response).await;
         }
 
         RpcCommand::GetDeviceInfo => {
@@ -391,9 +435,12 @@ async fn handle_rpc_command<W: WifiManager>(
                 &config.device_name,
             );
 
-            let mut s = state.write().await;
-            s.rpc_result = response;
-            s.error_state = ImprovError::None;
+            {
+                let mut s = state.write().await;
+                s.rpc_result = response.clone();
+                s.error_state = ImprovError::None;
+            }
+            send_rpc_notification(&state, &response).await;
         }
 
         RpcCommand::ScanWifiNetworks => {
@@ -413,8 +460,11 @@ async fn handle_rpc_command<W: WifiManager>(
 
                     let response = build_scan_response(&network_tuples);
 
-                    let mut s = state.write().await;
-                    s.rpc_result = response;
+                    {
+                        let mut s = state.write().await;
+                        s.rpc_result = response.clone();
+                    }
+                    send_rpc_notification(&state, &response).await;
                 }
                 Err(e) => {
                     error!("WiFi scan failed: {}", e);
@@ -452,9 +502,14 @@ async fn handle_rpc_command<W: WifiManager>(
 
                     let response = build_provision_response(&config.redirect_url);
 
-                    let mut s = state.write().await;
-                    s.improv_state = ImprovState::Provisioned;
-                    s.rpc_result = response;
+                    {
+                        let mut s = state.write().await;
+                        s.improv_state = ImprovState::Provisioned;
+                        s.rpc_result = response.clone();
+                    }
+
+                    // Send the notification BEFORE emitting the event.
+                    send_rpc_notification(&state, &response).await;
 
                     let _ = event_tx
                         .send(BleEvent::ProvisioningComplete(config.redirect_url.clone()))

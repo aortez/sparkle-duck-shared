@@ -245,17 +245,23 @@ For broader device support (iOS, non-Chrome browsers), a future enhancement coul
 - [ ] **Integration test:** Timeout expires → state returns to idle
 - [ ] **End-to-end test:** Web Bluetooth demo connects and provisions (manual)
 
-### Phase 5: Yocto Packaging
+### Phase 5: Yocto Packaging ✅
 - [x] Create recipe for wifi-provisioner (with 141 crate dependencies)
 - [x] systemd service file with security hardening
 - [x] Add to pi-base-image.bbclass (includes bluez5 + wifi-provisioner)
 - [x] Refactor dirtsim-image to inherit pi-base-image (-71 lines, removed duplication)
 - [x] Fix systemd-timesyncd issue (built into systemd, not separate package)
+- [x] Disable systemd-networkd to fix 120s boot delay (NetworkManager only)
 - [x] **Integration test:** Service starts on boot
 - [x] **Integration test:** Service auto-advertises when WiFi disconnected
 - [x] **End-to-end test:** Web Bluetooth from phone → provision WiFi → Pi connected
 - [x] Test in dirtsim image (Pi 5 with HyperPixel display)
 - [x] Fix Identify command to send acknowledgment response
+- [x] **BUG FIX:** Fix BLE RPC Result notifications (web page was spinning forever)
+  - Switched from empty callback to CharacteristicNotifyMethod::Io
+  - Added CharacteristicControl to receive notification subscriptions
+  - Send notifications via CharacteristicWriter after RPC responses
+  - Tested end-to-end: success response now reaches client immediately
 
 ### Phase 6: Web Setup Page
 - [ ] Create wifi.html page using Improv WiFi JS SDK

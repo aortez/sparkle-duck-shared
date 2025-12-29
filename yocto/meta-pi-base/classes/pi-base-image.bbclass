@@ -70,6 +70,16 @@ IMAGE_INSTALL:append = " \
     avahi-utils \
 "
 
+# Bluetooth support.
+IMAGE_INSTALL:append = " \
+    bluez5 \
+"
+
+# WiFi provisioning via BLE (Improv WiFi protocol).
+IMAGE_INSTALL:append = " \
+    wifi-provisioner \
+"
+
 # Useful base utilities.
 IMAGE_INSTALL:append = " \
     sudo \

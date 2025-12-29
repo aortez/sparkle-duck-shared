@@ -1,6 +1,6 @@
 # WiFi Provisioner
 
-**Status: WIP - Phase 1-4 complete, ready for Yocto packaging**
+**Status: WIP - Phase 1-5 complete, ready for Pi testing**
 
 A lightweight Bluetooth LE daemon for WiFi provisioning on Raspberry Pi. Implements the [Improv WiFi](https://www.improv-wifi.com/) protocol, allowing users to configure WiFi credentials from their phone without needing physical access to the device.
 
@@ -246,11 +246,11 @@ For broader device support (iOS, non-Chrome browsers), a future enhancement coul
 - [ ] **End-to-end test:** Web Bluetooth demo connects and provisions (manual)
 
 ### Phase 5: Yocto Packaging
-- [ ] Create recipe for wifi-provisioner
-- [ ] systemd service file
-- [ ] Add to pi-base-image.bbclass
-- [ ] **Integration test:** Service starts on boot
-- [ ] **Integration test:** Service auto-advertises when WiFi disconnected
+- [x] Create recipe for wifi-provisioner
+- [x] systemd service file
+- [x] Add to pi-base-image.bbclass
+- [ ] **Integration test:** Service starts on boot — requires Pi
+- [ ] **Integration test:** Service auto-advertises when WiFi disconnected — requires Pi
 - [ ] Test in dirtsim and inky-soup images
 
 ### Phase 6: Web Setup Page
@@ -278,7 +278,12 @@ wifi-provisioner/
 ├── tests/
 │   └── integration.rs    # WebSocket integration tests
 └── systemd/
-    └── wifi-provisioner.service  # systemd unit (Phase 5)
+    └── wifi-provisioner.service  # systemd unit
+
+# Yocto recipe location (in meta-pi-base layer):
+../yocto/meta-pi-base/recipes-connectivity/wifi-provisioner/
+├── wifi-provisioner_git.bb       # Recipe (uses externalsrc)
+└── files/                        # (empty, service file in source tree)
 ```
 
 ## Dependencies
@@ -300,7 +305,28 @@ tokio-test = "0.4"
 
 ## Building
 
-TODO
+```bash
+# Debug build
+cargo build
+
+# Release build (smaller binary, optimized)
+cargo build --release
+
+# Run directly
+cargo run
+```
+
+**Cross-compiling for Raspberry Pi:**
+
+Cross-compilation is handled by Yocto (see Phase 5). For manual cross-compilation:
+
+```bash
+# Install target
+rustup target add aarch64-unknown-linux-gnu
+
+# Build (requires linker configuration)
+cargo build --release --target aarch64-unknown-linux-gnu
+```
 
 ## Testing
 
@@ -331,27 +357,52 @@ Integration tests start a real WebSocket server and verify end-to-end behavior.
 
 ### Manual Testing
 
-**WebSocket (with websocat or similar):**
+**Prerequisites:**
+```bash
+# Install websocat (Rust WebSocket CLI)
+cargo install websocat
+
+# Verify Bluetooth and NetworkManager are available
+bluetoothctl show        # Should show adapter info
+nmcli general status     # Should show "connected"
+```
+
+**WebSocket (with websocat):**
 ```bash
 # Start the daemon
 cargo run
 
-# In another terminal, connect and send commands
-websocat ws://127.0.0.1:8888
-{"cmd":"status"}
-{"cmd":"scan"}
-{"cmd":"start","timeout":60}
+# In another terminal, test commands one at a time:
+echo '{"cmd":"status"}' | websocat ws://127.0.0.1:8888
+# Expected: {"ok":true,"state":"idle","wifi_connected":true}
+
+echo '{"cmd":"scan"}' | timeout 10 websocat ws://127.0.0.1:8888
+# Expected: {"ok":true,"state":"idle","networks":[{"ssid":"...","signal":-45,"security":"wpa2"},...]}
+
+echo '{"cmd":"start","timeout":60}' | websocat ws://127.0.0.1:8888
+# Expected: {"ok":true,"state":"advertising","remaining":60,"wifi_connected":true}
+
+echo '{"cmd":"stop"}' | websocat ws://127.0.0.1:8888
+# Expected: {"ok":true,"state":"idle","wifi_connected":true}
 ```
 
-**BLE (with bluetoothctl):**
+**Verifying BLE GATT Registration:**
 ```bash
-# Check if advertising
+# Check that Improv WiFi UUID is registered on the adapter
+dbus-send --system --print-reply --dest=org.bluez \
+  /org/bluez/hci0 org.freedesktop.DBus.Properties.Get \
+  string:org.bluez.Adapter1 string:UUIDs
+
+# Look for: "00467768-6228-2272-4663-277478268000" (Improv WiFi service)
+```
+
+**Verifying BLE Advertising (from another device):**
+```bash
+# On a separate machine or phone, scan for BLE devices
+# The daemon advertises as the hostname (e.g., "DirtSim-A1B2")
 bluetoothctl
 > scan on
-# Look for device name like "DirtSim-XXXX"
-
-# Or check adapter status
-bluetoothctl show
+# Look for device name matching your hostname
 ```
 
 **End-to-end (with Web Bluetooth):**
@@ -361,6 +412,18 @@ bluetoothctl show
 4. Verify device info appears
 5. Send WiFi credentials
 6. Verify device connects
+
+**Daemon Log Messages (what to expect):**
+```
+INFO wifi_provisioner: wifi-provisioner starting
+INFO wifi_provisioner::wifi: WiFi connected to: YourNetwork
+INFO wifi_provisioner: WebSocket server started on 127.0.0.1:8888
+INFO wifi_provisioner::ble: Initializing BLE...
+INFO wifi_provisioner::ble: Using Bluetooth adapter hci0 (XX:XX:XX:XX:XX:XX)
+INFO wifi_provisioner::ble: GATT application registered
+INFO wifi_provisioner::ble: BLE advertising started as 'YourHostname'
+INFO wifi_provisioner::ble: BLE server running, waiting for connections...
+```
 
 ## Compatible Clients
 

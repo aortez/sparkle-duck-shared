@@ -1,0 +1,23 @@
+[Unit]
+Description=WiFi Provisioner BLE Daemon
+Documentation=https://www.improv-wifi.com/
+After=bluetooth.target network.target
+Wants=bluetooth.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/wifi-provisioner
+Restart=on-failure
+RestartSec=5
+
+# Logging.
+Environment=RUST_LOG=info
+
+# Security hardening.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

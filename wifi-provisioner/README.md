@@ -1,6 +1,6 @@
 # WiFi Provisioner
 
-**Status: WIP - Not yet implemented**
+**Status: WIP - Phase 1 & 2 complete, Phase 3 (BLE) in progress**
 
 A lightweight Bluetooth LE daemon for WiFi provisioning on Raspberry Pi. Implements the [Improv WiFi](https://www.improv-wifi.com/) protocol, allowing users to configure WiFi credentials from their phone without needing physical access to the device.
 
@@ -198,27 +198,27 @@ For broader device support (iOS, non-Chrome browsers), a future enhancement coul
 
 ## Implementation Plan
 
-### Phase 1: Project Skeleton
-- [ ] Initialize Cargo project with dependencies
-- [ ] Basic tokio async main
-- [ ] WebSocket server accepting connections
-- [ ] Command/response types with serde
-- [ ] Simple command handling (stub responses)
-- [ ] **Unit tests:** Command parsing (all variants, invalid input)
-- [ ] **Unit tests:** Response serialization (success, error, optional fields)
-- [ ] **Integration test:** Connect to WebSocket, send command, verify response
+### Phase 1: Project Skeleton ✅
+- [x] Initialize Cargo project with dependencies
+- [x] Basic tokio async main
+- [x] WebSocket server accepting connections
+- [x] Command/response types with serde
+- [x] Simple command handling (stub responses)
+- [x] **Unit tests:** Command parsing (all variants, invalid input)
+- [x] **Unit tests:** Response serialization (success, error, optional fields)
+- [x] **Integration test:** Connect to WebSocket, send command, verify response
 
-### Phase 2: WiFi Operations
-- [ ] WifiManager trait (abstraction for testing)
-- [ ] NmcliWifiManager implementation
-- [ ] Query connection status via nmcli
-- [ ] Scan available networks via nmcli
-- [ ] Connect to network via nmcli
-- [ ] Parse nmcli output formats
-- [ ] **Unit tests:** nmcli output parsing (various formats, edge cases)
-- [ ] **Unit tests:** Mock WifiManager for command handler logic
-- [ ] **Integration test:** WebSocket scan command returns real networks (on Pi)
-- [ ] **Manual test:** Verify on real Pi with real WiFi
+### Phase 2: WiFi Operations ✅
+- [x] WifiManager trait (abstraction for testing)
+- [x] NmcliWifiManager implementation
+- [x] Query connection status via nmcli
+- [x] Scan available networks via nmcli
+- [x] Connect to network via nmcli
+- [x] Parse nmcli output formats
+- [x] **Unit tests:** nmcli output parsing (various formats, edge cases)
+- [x] **Unit tests:** Mock WifiManager for command handler logic
+- [x] **Integration test:** WebSocket scan command returns real networks (on Pi)
+- [x] **Manual test:** Verify on real Pi with real WiFi
 
 ### Phase 3: BLE GATT Server
 - [ ] Improv protocol constants (UUIDs, command IDs, states)

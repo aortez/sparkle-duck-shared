@@ -1,0 +1,21 @@
+[package]
+name = "wifi-provisioner"
+version = "0.1.0"
+edition = "2021"
+description = "BLE daemon for WiFi provisioning using Improv WiFi protocol"
+license = "MIT"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "macros", "time", "process"] }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Phase 3: BLE support
+# bluer = { version = "0.17", features = ["bluetoothd"] }
+
+[dev-dependencies]
+tokio-test = "0.4"

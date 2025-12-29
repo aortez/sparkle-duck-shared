@@ -15,8 +15,8 @@ use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info, warn};
 
 use crate::improv::{
-    build_device_info_response, build_provision_response, build_scan_response, capabilities,
-    characteristic, ImprovError, ImprovState, RpcCommand, RpcRequest, SERVICE_UUID,
+    build_device_info_response, build_provision_response, build_response, build_scan_response,
+    capabilities, characteristic, ImprovError, ImprovState, RpcCommand, RpcRequest, SERVICE_UUID,
 };
 use crate::wifi::WifiManager;
 
@@ -376,6 +376,11 @@ async fn handle_rpc_command<W: WifiManager>(
         RpcCommand::Identify => {
             // Send identify event to main app.
             let _ = event_tx.send(BleEvent::Identify).await;
+
+            // Send empty response to acknowledge.
+            let response = build_response(RpcCommand::Identify, &[]);
+            let mut s = state.write().await;
+            s.rpc_result = response;
         }
 
         RpcCommand::GetDeviceInfo => {

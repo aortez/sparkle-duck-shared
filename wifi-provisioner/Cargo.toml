@@ -14,8 +14,8 @@ serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Phase 3: BLE support
-# bluer = { version = "0.17", features = ["bluetoothd"] }
+# Phase 3: BLE support.
+bluer = { version = "0.17", features = ["bluetoothd"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

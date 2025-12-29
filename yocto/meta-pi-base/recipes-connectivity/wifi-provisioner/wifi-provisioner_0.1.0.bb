@@ -159,7 +159,7 @@ SRC_URI = " \
 "
 
 # Pin to the commit with BLE notification and boot fixes.
-SRCREV = "f8da01fb0321c7dffd4f1976f1ddbe9c1e6ad51b"
+SRCREV = "c47c953fcb41a4b8945bc315cb1704a9a97004ed"
 S = "${WORKDIR}/git/wifi-provisioner"
 
 # Downgrade Cargo.lock from version 4 to version 3 for Rust 1.75 compatibility.

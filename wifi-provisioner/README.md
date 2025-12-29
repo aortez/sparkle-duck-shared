@@ -1,6 +1,6 @@
 # WiFi Provisioner
 
-**Status: WIP - Phase 1 & 2 complete, Phase 3 (BLE) in progress**
+**Status: WIP - Phase 1-4 complete, ready for Yocto packaging**
 
 A lightweight Bluetooth LE daemon for WiFi provisioning on Raspberry Pi. Implements the [Improv WiFi](https://www.improv-wifi.com/) protocol, allowing users to configure WiFi credentials from their phone without needing physical access to the device.
 
@@ -220,28 +220,28 @@ For broader device support (iOS, non-Chrome browsers), a future enhancement coul
 - [x] **Integration test:** WebSocket scan command returns real networks (on Pi)
 - [x] **Manual test:** Verify on real Pi with real WiFi
 
-### Phase 3: BLE GATT Server
-- [ ] Improv protocol constants (UUIDs, command IDs, states)
-- [ ] RPC packet parsing (checksum validation, payload extraction)
-- [ ] RPC response building (device info, scan results, errors)
-- [ ] Initialize bluer and BlueZ connection
-- [ ] Register Improv WiFi service and characteristics
-- [ ] Implement advertising start/stop
-- [ ] Handle RPC command characteristic writes
-- [ ] Send responses via RPC result characteristic
-- [ ] **Unit tests:** Checksum calculation
-- [ ] **Unit tests:** Parse WiFi credentials packet
-- [ ] **Unit tests:** Build device info response
-- [ ] **Unit tests:** Parse/reject malformed packets
-- [ ] **Integration test:** BLE advertises (check with `bluetoothctl`)
+### Phase 3: BLE GATT Server ✅
+- [x] Improv protocol constants (UUIDs, command IDs, states)
+- [x] RPC packet parsing (checksum validation, payload extraction)
+- [x] RPC response building (device info, scan results, errors)
+- [x] Initialize bluer and BlueZ connection
+- [x] Register Improv WiFi service and characteristics
+- [x] Implement advertising start/stop
+- [x] Handle RPC command characteristic writes
+- [x] Send responses via RPC result characteristic
+- [x] **Unit tests:** Checksum calculation
+- [x] **Unit tests:** Parse WiFi credentials packet
+- [x] **Unit tests:** Build device info response
+- [x] **Unit tests:** Parse/reject malformed packets
+- [ ] **Integration test:** BLE advertises (check with `bluetoothctl`) — requires Pi
 
-### Phase 4: Integration
-- [ ] Combine WebSocket + BLE in single async runtime
-- [ ] Shared state between WebSocket commands and BLE events
-- [ ] Auto-advertise on boot if no WiFi
-- [ ] Timeout handling (stop advertising after N seconds)
-- [ ] Return URL after successful connection
-- [ ] **Integration test:** WebSocket start → BLE advertises → WebSocket status shows advertising
+### Phase 4: Integration ✅
+- [x] Combine WebSocket + BLE in single async runtime
+- [x] Shared state between WebSocket commands and BLE events
+- [x] Auto-advertise on boot if no WiFi
+- [x] Timeout handling (stop advertising after N seconds)
+- [x] Return URL after successful connection
+- [ ] **Integration test:** WebSocket start → BLE advertises — requires Pi
 - [ ] **Integration test:** Timeout expires → state returns to idle
 - [ ] **End-to-end test:** Web Bluetooth demo connects and provisions (manual)
 
@@ -266,12 +266,15 @@ For broader device support (iOS, non-Chrome browsers), a future enhancement coul
 wifi-provisioner/
 ├── README.md
 ├── Cargo.toml
+├── Cargo.lock
 ├── src/
-│   ├── main.rs           # Entry point, tokio runtime
+│   ├── main.rs           # Entry point, runs WebSocket + BLE servers
+│   ├── lib.rs            # Library exports for testing
+│   ├── protocol.rs       # WebSocket command/response types
 │   ├── websocket.rs      # WebSocket server + command handling
 │   ├── wifi.rs           # WifiManager trait + NmcliWifiManager
-│   ├── ble.rs            # BLE GATT server (Phase 3)
-│   └── improv.rs         # Improv protocol constants + parsing (Phase 3)
+│   ├── ble.rs            # BLE GATT server using bluer
+│   └── improv.rs         # Improv protocol constants + RPC parsing
 ├── tests/
 │   └── integration.rs    # WebSocket integration tests
 └── systemd/

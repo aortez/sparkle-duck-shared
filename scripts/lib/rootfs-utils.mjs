@@ -232,3 +232,86 @@ export async function remoteFlash(remoteImagePath, device, remoteTarget, dryRun 
   // Give it a moment to start rebooting.
   await new Promise(resolve => setTimeout(resolve, 2000));
 }
+
+/**
+ * Flash image to remote device using ab-update-with-key.
+ * This performs SSH key injection on the Pi, eliminating the need for local sudo.
+ * @param {string} remoteImagePath - Path to rootfs.ext4.gz on remote system.
+ * @param {string|null} remoteKeyPath - Path to SSH public key on remote system (or null to skip).
+ * @param {string} username - Username for SSH key injection (e.g., 'dirtsim').
+ * @param {string} remoteTarget - user@host string.
+ * @param {boolean} dryRun - If true, skip actual flash.
+ * @param {boolean} skipConfirm - If true, skip confirmation prompt.
+ * @param {string} updateScript - Path or name of update script (default: 'ab-update-with-key').
+ * @returns {Promise<void>}
+ */
+export async function remoteFlashWithKey(remoteImagePath, remoteKeyPath, username, remoteTarget, dryRun = false, skipConfirm = false, updateScript = 'ab-update-with-key') {
+  // Extract hostname from remoteTarget for display.
+  const remoteHost = remoteTarget.split('@')[1] || remoteTarget;
+
+  console.log('');
+  console.log(`${colors.yellow}    ☠️  YOLO MODE - A/B Update  ☠️${colors.reset}`);
+  console.log(`${colors.dim}    Flashing to inactive slot. Previous slot remains intact.${colors.reset}`);
+  console.log('');
+
+  // Build the command with optional key path.
+  let updateCmd = `${updateScript} ${remoteImagePath}`;
+  if (remoteKeyPath) {
+    updateCmd += ` ${remoteKeyPath} ${username}`;
+  }
+
+  if (dryRun) {
+    console.log(`${colors.yellow}DRY RUN - would execute:${colors.reset}`);
+    console.log('');
+    console.log(`  # A/B Update with key injection`);
+    console.log(`  ${updateCmd}`);
+    console.log('');
+    console.log(`  # Reboot to activate new slot`);
+    console.log(`  sudo systemctl reboot`);
+    console.log('');
+    return;
+  }
+
+  // Final confirmation.
+  console.log(`${colors.bold}${colors.cyan}═══════════════════════════════════════════════════════════════${colors.reset}`);
+  console.log(`${colors.bold}${colors.cyan}  Flashing to inactive partition on ${remoteHost}${colors.reset}`);
+  if (remoteKeyPath) {
+    console.log(`${colors.bold}${colors.cyan}  SSH key will be injected for user: ${username}${colors.reset}`);
+  }
+  console.log(`${colors.bold}${colors.cyan}  The previous slot remains bootable if this fails.${colors.reset}`);
+  console.log(`${colors.bold}${colors.cyan}═══════════════════════════════════════════════════════════════${colors.reset}`);
+  console.log('');
+
+  if (!skipConfirm) {
+    const confirm = await prompt(`Type "yolo" to proceed: `);
+    if (confirm.toLowerCase() !== 'yolo') {
+      error('Aborted.');
+      process.exit(1);
+    }
+  } else {
+    console.log(`${colors.yellow}🍺 Hold my mead... here we go!${colors.reset}`);
+  }
+
+  console.log('');
+  info('Running A/B update with key injection on Pi...');
+  console.log('');
+
+  // Run ab-update-with-key which flashes and optionally injects SSH key.
+  try {
+    await sshRun(remoteTarget, updateCmd);
+
+    success('A/B update complete!');
+    console.log('');
+    info('Rebooting to activate new rootfs...');
+
+    // Reboot to new slot.
+    runCapture(`ssh -o ConnectTimeout=5 -o BatchMode=yes ${remoteTarget} "sudo systemctl reboot"`);
+
+  } catch (err) {
+    error(`A/B update failed: ${err.message}`);
+    throw err;
+  }
+
+  // Give it a moment to start rebooting.
+  await new Promise(resolve => setTimeout(resolve, 2000));
+}

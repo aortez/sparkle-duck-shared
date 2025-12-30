@@ -1,0 +1,99 @@
+#!/bin/sh
+# A/B Update Helper with SSH Key Injection
+# Flashes rootfs to inactive partition with optional SSH key injection.
+# This enables sudo-free remote updates by doing all privileged operations on the Pi.
+#
+# Usage:
+#   ab-update-with-key <rootfs.ext4.gz> [ssh_pubkey_file] [username]
+#
+# Examples:
+#   ab-update-with-key /tmp/rootfs.ext4.gz
+#   ab-update-with-key /tmp/rootfs.ext4.gz /tmp/id_ed25519.pub dirtsim
+
+set -e
+
+IMAGE_PATH="$1"
+SSH_KEY_PATH="$2"
+USERNAME="${3:-dirtsim}"
+
+if [ -z "$IMAGE_PATH" ]; then
+    echo "usage: $0 <rootfs.ext4.gz> [ssh_pubkey_file] [username]" >&2
+    echo "" >&2
+    echo "Arguments:" >&2
+    echo "  rootfs.ext4.gz   Path to compressed rootfs image" >&2
+    echo "  ssh_pubkey_file  Optional path to SSH public key to inject" >&2
+    echo "  username         User to inject key for (default: dirtsim)" >&2
+    exit 1
+fi
+
+if [ ! -f "$IMAGE_PATH" ]; then
+    echo "error: $IMAGE_PATH not found" >&2
+    exit 1
+fi
+
+# Get inactive partition.
+INACTIVE_SLOT=$(ab-boot-manager inactive)
+INACTIVE_DEV=$(ab-boot-manager inactive-device)
+
+echo "=== A/B Update with Key Injection ==="
+echo "Inactive slot: $INACTIVE_SLOT"
+echo "Target device: $INACTIVE_DEV"
+echo "Image: $IMAGE_PATH"
+if [ -n "$SSH_KEY_PATH" ]; then
+    echo "SSH key: $SSH_KEY_PATH (for user: $USERNAME)"
+fi
+echo ""
+
+# Flash to inactive partition first.
+echo "Flashing rootfs to $INACTIVE_DEV..."
+gunzip -c "$IMAGE_PATH" | sudo dd of="$INACTIVE_DEV" bs=4M
+sync
+
+echo "Verifying filesystem..."
+sudo e2fsck -f -y "$INACTIVE_DEV" || true
+
+# Inject SSH key if provided.
+if [ -n "$SSH_KEY_PATH" ]; then
+    if [ ! -f "$SSH_KEY_PATH" ]; then
+        echo "warning: SSH key file $SSH_KEY_PATH not found, skipping injection" >&2
+    else
+        echo ""
+        echo "Injecting SSH key..."
+
+        # Create temporary mount point.
+        MOUNT_POINT=$(mktemp -d)
+
+        # Mount the freshly flashed partition.
+        sudo mount "$INACTIVE_DEV" "$MOUNT_POINT"
+
+        # Inject the SSH key.
+        SSH_DIR="$MOUNT_POINT/home/$USERNAME/.ssh"
+        AUTH_KEYS="$SSH_DIR/authorized_keys"
+
+        if [ -d "$MOUNT_POINT/home/$USERNAME" ]; then
+            sudo mkdir -p "$SSH_DIR"
+            sudo cp "$SSH_KEY_PATH" "$AUTH_KEYS"
+            sudo chmod 700 "$SSH_DIR"
+            sudo chmod 600 "$AUTH_KEYS"
+            # UID 1000 is the first regular user (dirtsim/inky/etc.).
+            sudo chown -R 1000:1000 "$SSH_DIR"
+            echo "SSH key injected for user $USERNAME"
+        else
+            echo "warning: /home/$USERNAME not found in image, skipping SSH key injection" >&2
+        fi
+
+        # Unmount.
+        sudo umount "$MOUNT_POINT"
+        rmdir "$MOUNT_POINT"
+        sync
+    fi
+fi
+
+echo ""
+echo "Switching boot slot to $INACTIVE_SLOT..."
+sudo ab-boot-manager switch "$INACTIVE_SLOT"
+
+echo ""
+echo "=== Update Complete ==="
+echo "Next boot will use slot $INACTIVE_SLOT"
+echo "Reboot now to activate the new image."

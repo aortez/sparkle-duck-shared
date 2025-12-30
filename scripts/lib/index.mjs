@@ -20,7 +20,7 @@
  *     run, runCapture,
  *     ssh, sshRun, checkRemoteReachable, transferImage, waitForReboot,
  *     getRemoteTmpSpace, getRemoteBootDevice, getRemoteUptime, getRemoteBootTime, verifyRemoteChecksum,
- *     calculateChecksum, prepareRootfs, remoteFlash, cleanupPreparedImage,
+ *     calculateChecksum, remoteFlashWithKey,  // No local sudo needed!
  *     createCleanupManager,
  *     loadConfig,
  *   } from '../path/to/pi-base/scripts/lib/index.mjs';
@@ -116,4 +116,5 @@ export {
   prepareRootfs,
   cleanupPreparedImage,
   remoteFlash,
+  remoteFlashWithKey,
 } from './rootfs-utils.mjs';

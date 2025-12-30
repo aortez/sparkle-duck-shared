@@ -5,6 +5,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 
 SRC_URI = "file://ab-boot-manager \
            file://ab-update \
+           file://ab-update-with-key \
           "
 
 S = "${WORKDIR}"
@@ -15,6 +16,7 @@ do_install() {
     install -d ${D}${sbindir}
     install -m 0755 ${WORKDIR}/ab-boot-manager ${D}${sbindir}/ab-boot-manager
     install -m 0755 ${WORKDIR}/ab-update ${D}${sbindir}/ab-update
+    install -m 0755 ${WORKDIR}/ab-update-with-key ${D}${sbindir}/ab-update-with-key
 }
 
-FILES:${PN} = "${sbindir}/ab-boot-manager ${sbindir}/ab-update"
+FILES:${PN} = "${sbindir}/ab-boot-manager ${sbindir}/ab-update ${sbindir}/ab-update-with-key"

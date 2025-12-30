@@ -92,8 +92,26 @@ export function getRemoteBootDevice(remoteTarget, fallbackDevice = '/dev/sda') {
 }
 
 /**
+ * Get remote system uptime in seconds.
+ * Uses /proc/uptime which is reliable regardless of RTC/NTP status.
+ * @param {string} remoteTarget - user@host string.
+ * @returns {number} Uptime in seconds or -1 on error.
+ */
+export function getRemoteUptime(remoteTarget) {
+  const result = ssh(remoteTarget, "cat /proc/uptime | cut -d' ' -f1");
+  if (result) {
+    const uptime = parseFloat(result);
+    if (!isNaN(uptime)) {
+      return uptime;
+    }
+  }
+  return -1;
+}
+
+/**
  * Get remote system boot time (seconds since epoch).
  * Uses /proc/stat btime which is boot time in seconds since epoch.
+ * Note: This can be unreliable on systems without RTC before NTP syncs.
  * @param {string} remoteTarget - user@host string.
  * @returns {number} Boot timestamp or 0 on error.
  */
@@ -110,16 +128,18 @@ export function getRemoteBootTime(remoteTarget) {
 
 /**
  * Wait for remote system to reboot and come back online.
- * Verifies that the system actually rebooted by checking boot time.
+ * Verifies reboot by checking that uptime is low (< 60s) after system comes back.
+ * This is more reliable than boot time on systems without RTC.
  * @param {string} remoteTarget - user@host string.
  * @param {string} remoteHost - Hostname for display.
- * @param {number} originalBootTime - Boot time before reboot.
+ * @param {number} originalBootTime - Boot time before reboot (unused, kept for API compat).
  * @param {number} timeoutSec - Timeout in seconds (default: 120).
  * @returns {Promise<boolean>} True if reboot verified, false on timeout.
  */
 export async function waitForReboot(remoteTarget, remoteHost, originalBootTime, timeoutSec = 120) {
   const startTime = Date.now();
   const timeoutMs = timeoutSec * 1000;
+  const MAX_FRESH_UPTIME = 120; // Consider rebooted if uptime < 2 minutes.
   let dots = 0;
   let sawOffline = false;
 
@@ -140,17 +160,17 @@ export async function waitForReboot(remoteTarget, remoteHost, originalBootTime, 
         sawOffline = true;
       }
     } else if (sawOffline) {
-      // System came back - verify it actually rebooted.
-      const newBootTime = getRemoteBootTime(remoteTarget);
-      if (newBootTime > originalBootTime) {
+      // System came back - verify it actually rebooted by checking uptime.
+      const uptime = getRemoteUptime(remoteTarget);
+      if (uptime >= 0 && uptime < MAX_FRESH_UPTIME) {
         process.stdout.write('\r' + ' '.repeat(50) + '\r');
         success(`${remoteHost} is back online!`);
-        info(`Boot time changed: ${originalBootTime} -> ${newBootTime}`);
+        info(`Uptime: ${uptime.toFixed(1)}s (freshly rebooted)`);
         return true;
       } else {
-        // Same boot time - didn't actually reboot!
+        // High uptime - didn't actually reboot!
         process.stdout.write('\r' + ' '.repeat(50) + '\r');
-        warn('System responded but boot time unchanged - reboot may have failed!');
+        warn(`System responded but uptime is ${uptime.toFixed(1)}s - reboot may have failed!`);
         return false;
       }
     }
@@ -161,16 +181,16 @@ export async function waitForReboot(remoteTarget, remoteHost, originalBootTime, 
   process.stdout.write('\r' + ' '.repeat(50) + '\r');
 
   // Final check - maybe it rebooted quickly before we noticed it went offline.
-  const finalBootTime = getRemoteBootTime(remoteTarget);
-  if (finalBootTime > originalBootTime) {
+  const uptime = getRemoteUptime(remoteTarget);
+  if (uptime >= 0 && uptime < MAX_FRESH_UPTIME) {
     success(`${remoteHost} is back online!`);
-    info(`Boot time changed: ${originalBootTime} -> ${finalBootTime}`);
+    info(`Uptime: ${uptime.toFixed(1)}s (freshly rebooted)`);
     return true;
   }
 
   warn(`Timeout waiting for reboot after ${timeoutSec}s`);
-  if (finalBootTime === originalBootTime) {
-    console.error(`${colors.red}✗${colors.reset} Boot time unchanged - reboot did NOT happen!`);
+  if (uptime >= 0) {
+    console.error(`${colors.red}✗${colors.reset} Uptime is ${uptime.toFixed(1)}s - reboot did NOT happen!`);
   }
   return false;
 }

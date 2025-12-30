@@ -1,18 +1,5 @@
-# Node.js
-node_modules/
-package-lock.json
-*.log
-
-# Secrets (wifi-creds.local.example is safe to commit)
-wifi-creds.local
-
-# Editor
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
+# Build artifacts (symlinks)
+wifi-provisioner/oe-logs
+wifi-provisioner/oe-workdir
+wifi-provisioner/*.bb
+yocto/meta-pi-base/recipes-connectivity/wifi-provisioner/wifi-provisioner-crates.inc

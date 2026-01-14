@@ -2,4 +2,3 @@
 wifi-provisioner/oe-logs
 wifi-provisioner/oe-workdir
 wifi-provisioner/*.bb
-yocto/meta-pi-base/recipes-connectivity/wifi-provisioner/wifi-provisioner-crates.inc

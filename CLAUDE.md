@@ -67,7 +67,7 @@ Provides `ab-boot-manager` and `ab-update` scripts for A/B partition management:
 - `ab-update <rootfs.ext4.gz>` - Flash image to inactive slot and switch
 
 ### persistent-data
-Mounts `/data` partition (partition 4) and bind-mounts NetworkManager connections so WiFi credentials survive A/B updates.
+Mounts `/data` partition (partition 4), creates an app-owned directory under `/data`, and bind-mounts NetworkManager connections so WiFi credentials survive A/B updates.
 
 ### hostname-setup
 Reads `/boot/hostname.txt` at boot and sets the system hostname. Override default with `HOSTNAME_DEFAULT` variable in your image recipe.

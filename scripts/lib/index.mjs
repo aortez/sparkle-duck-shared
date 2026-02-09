@@ -59,9 +59,11 @@ export {
 // Partition utilities.
 export {
   hasDataPartition,
+  getPartitionDevice,
   backupDataPartition,
   restoreDataPartition,
   cleanupBackup,
+  growDataPartition,
   setHostname,
 } from './partition-utils.mjs';
 

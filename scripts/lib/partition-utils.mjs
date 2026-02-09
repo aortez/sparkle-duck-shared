@@ -4,10 +4,91 @@
  */
 
 import { execSync } from 'child_process';
-import { existsSync, readdirSync, mkdtempSync, rmdirSync } from 'fs';
+import { readdirSync, mkdtempSync, rmdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { log, info, success, warn, TEMP_PREFIX } from './cli-utils.mjs';
+
+function hasCommand(cmd) {
+  try {
+    execSync(`command -v ${cmd} >/dev/null 2>&1`, { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function requireCommand(cmd, installHint) {
+  if (hasCommand(cmd)) {
+    return;
+  }
+
+  const hint = installHint ? ` ${installHint}` : '';
+  throw new Error(`Missing required command: ${cmd}.${hint}`);
+}
+
+function runAllowExitCodes(cmd, allowedExitCodes = [0]) {
+  try {
+    execSync(cmd, { stdio: 'pipe' });
+    return 0;
+  } catch (err) {
+    const code = typeof err.status === 'number' ? err.status : null;
+    if (code !== null && allowedExitCodes.includes(code)) {
+      return code;
+    }
+
+    const stderr = err && err.stderr ? String(err.stderr).trim() : '';
+    const details = stderr ? `\n${stderr}` : '';
+    throw new Error(`Command failed: ${cmd}${details}`);
+  }
+}
+
+function refreshPartitionTable(device, partitionNumber = null) {
+  // Best-effort: ask the kernel to re-read the partition table and refresh nodes.
+  if (hasCommand('partprobe')) {
+    try {
+      execSync(`sudo partprobe ${device}`, { stdio: 'pipe' });
+    } catch {
+      // Ignore - we'll try partx below.
+    }
+  }
+
+  if (partitionNumber !== null && hasCommand('partx')) {
+    try {
+      execSync(`sudo partx --update --nr ${partitionNumber} ${device}`, { stdio: 'pipe' });
+    } catch {
+      // Ignore - the kernel may already be updated.
+    }
+  }
+
+  if (hasCommand('udevadm')) {
+    try {
+      execSync('sudo udevadm settle', { stdio: 'pipe' });
+    } catch {
+      // Ignore.
+    }
+  }
+}
+
+/**
+ * Get a partition device path for a disk device and partition number.
+ * Handles disks whose names end in digits (e.g. /dev/mmcblk0p4, /dev/nvme0n1p4).
+ * @param {string} device - The disk device path (e.g. /dev/sdb, /dev/mmcblk0).
+ * @param {number} partitionNumber - Partition number (1-based).
+ * @returns {string} Partition device path.
+ */
+export function getPartitionDevice(device, partitionNumber) {
+  if (!device || typeof device !== 'string') {
+    throw new Error('device is required');
+  }
+  const part = Number(partitionNumber);
+  if (!Number.isInteger(part) || part <= 0) {
+    throw new Error(`Invalid partitionNumber: ${partitionNumber}`);
+  }
+
+  const needsP = /\d$/.test(device);
+  return needsP ? `${device}p${part}` : `${device}${part}`;
+}
 
 /**
  * Check if the device has a data partition (partition 4) with content.
@@ -15,7 +96,7 @@ import { log, info, success, warn, TEMP_PREFIX } from './cli-utils.mjs';
  * @returns {boolean} True if data partition exists.
  */
 export function hasDataPartition(device) {
-  const dataPartition = `${device}4`;
+  const dataPartition = getPartitionDevice(device, 4);
   try {
     // Check if partition exists.
     execSync(`test -b ${dataPartition}`, { stdio: 'pipe' });
@@ -31,7 +112,7 @@ export function hasDataPartition(device) {
  * @returns {string|null} The backup directory path, or null on failure.
  */
 export function backupDataPartition(device) {
-  const dataPartition = `${device}4`;
+  const dataPartition = getPartitionDevice(device, 4);
   const backupDir = mkdtempSync(join(tmpdir(), `${TEMP_PREFIX}data-backup-`));
   const mountPoint = mkdtempSync(join(tmpdir(), `${TEMP_PREFIX}data-mount-`));
 
@@ -87,7 +168,7 @@ export function backupDataPartition(device) {
  * @returns {boolean} True if successful.
  */
 export function restoreDataPartition(device, backupDir, dryRun = false) {
-  const dataPartition = `${device}4`;
+  const dataPartition = getPartitionDevice(device, 4);
 
   log('');
   info('Restoring data to new image...');
@@ -144,13 +225,67 @@ export function cleanupBackup(backupDir) {
 }
 
 /**
+ * Grow the data partition (partition 4) to fill the disk, leaving a percentage unallocated,
+ * and then expand the ext4 filesystem to match.
+ * @param {string} device - The disk device path (e.g., /dev/sdb).
+ * @param {number} freePercent - Percentage of total disk space to leave unallocated.
+ * @param {boolean} dryRun - If true, only show what would happen.
+ */
+export function growDataPartition(device, freePercent = 10, dryRun = false) {
+  const partitionNumber = 4;
+  const dataPartition = getPartitionDevice(device, partitionNumber);
+
+  log('');
+  info(`Growing data partition to fill disk (leave ${freePercent}% unallocated)...`);
+
+  if (dryRun) {
+    log(`  Would run: sudo growpart --free-percent=${freePercent} ${device} ${partitionNumber}`);
+    log(`  Would run: sudo partprobe ${device} || true`);
+    log(`  Would run: sudo partx --update --nr ${partitionNumber} ${device} || true`);
+    log(`  Would run: sudo e2fsck -f -p ${dataPartition}`);
+    log(`  Would run: sudo resize2fs ${dataPartition}`);
+    return;
+  }
+
+  requireCommand('growpart', 'Install cloud-utils-growpart (e.g. `sudo apt-get install cloud-utils-growpart`).');
+  requireCommand('e2fsck', 'Install e2fsprogs (e.g. `sudo apt-get install e2fsprogs`).');
+  requireCommand('resize2fs', 'Install e2fsprogs (e.g. `sudo apt-get install e2fsprogs`).');
+
+  // Ensure no partitions on the device are mounted (some desktops may automount them).
+  try {
+    execSync(`sudo umount ${device}* 2>/dev/null || true`, { stdio: 'pipe' });
+  } catch {
+    // Ignore.
+  }
+
+  refreshPartitionTable(device, partitionNumber);
+
+  // growpart returns exit code 1 for NOCHANGE, which is not an error.
+  const growExit = runAllowExitCodes(
+    `sudo growpart --free-percent=${freePercent} ${device} ${partitionNumber}`,
+    [0, 1],
+  );
+  if (growExit === 1) {
+    info('Data partition already at maximum size (within free-percent target).');
+  }
+
+  refreshPartitionTable(device, partitionNumber);
+
+  // e2fsck returns 1 (fixed) or 2 (fixed, reboot recommended) in some cases; treat those as success.
+  runAllowExitCodes(`sudo e2fsck -f -p ${dataPartition}`, [0, 1, 2]);
+  execSync(`sudo resize2fs ${dataPartition}`, { stdio: 'pipe' });
+
+  success('Data partition resized.');
+}
+
+/**
  * Set hostname for the device by writing to boot partition.
  * @param {string} device - The device path (e.g., /dev/sdb).
  * @param {string} hostname - The hostname to set.
  * @param {boolean} dryRun - If true, only show what would happen.
  */
 export async function setHostname(device, hostname, dryRun = false) {
-  const bootPartition = `${device}1`;
+  const bootPartition = getPartitionDevice(device, 1);
 
   log('');
   info('Setting device hostname...');

@@ -9,6 +9,7 @@ import { join, basename } from 'path';
 import { homedir, tmpdir } from 'os';
 import { colors, log, info, success, warn, error, prompt, TEMP_PREFIX } from './cli-utils.mjs';
 import { saveConfig } from './config-utils.mjs';
+import { getPartitionDevice } from './partition-utils.mjs';
 
 /**
  * Find available SSH public keys in ~/.ssh/.
@@ -103,7 +104,7 @@ export async function configureSSHKey(configPath) {
  * @param {boolean} dryRun - If true, only show what would happen.
  */
 export async function injectSSHKey(device, sshKeyPath, username, uid = 1000, dryRun = false) {
-  const rootfsPartition = `${device}2`;
+  const rootfsPartition = getPartitionDevice(device, 2);
   const sshKey = readSshKey(sshKeyPath);
 
   if (!sshKey) {

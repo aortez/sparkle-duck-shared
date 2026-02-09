@@ -12,17 +12,11 @@ NM_SYSTEM="/etc/NetworkManager/system-connections"
 mkdir -p "$DATA_DIR/NetworkManager/system-connections"
 mkdir -p "$DATA_DIR/logs"
 mkdir -p "$DATA_DIR/config"
-mkdir -p "$DATA_DIR/dirtsim"
 
 # Set proper ownership for NetworkManager directory.
 # NetworkManager runs as root and needs these permissions.
 chmod 755 "$DATA_DIR/NetworkManager"
 chmod 700 "$DATA_DIR/NetworkManager/system-connections"
-
-# Set proper ownership for dirtsim directory.
-# DirtSim apps run as dirtsim user.
-chown dirtsim:video "$DATA_DIR/dirtsim"
-chmod 755 "$DATA_DIR/dirtsim"
 
 # If there are connections in the rootfs that aren't in /data, copy them.
 # This handles first boot after a fresh flash.

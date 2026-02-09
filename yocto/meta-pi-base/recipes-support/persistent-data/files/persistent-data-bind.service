@@ -1,11 +1,15 @@
 [Unit]
 Description=Bind mount persistent NetworkManager connections
-After=persistent-data-init.service data.mount
+After=data.mount persistent-data-init.service
 Before=NetworkManager.service
-Requires=persistent-data-init.service data.mount
+Requires=data.mount
+Wants=persistent-data-init.service
 
 [Service]
 Type=oneshot
+ExecStartPre=/bin/mkdir -p /data/NetworkManager/system-connections
+ExecStartPre=/bin/chmod 755 /data/NetworkManager
+ExecStartPre=/bin/chmod 700 /data/NetworkManager/system-connections
 ExecStart=/bin/mount --bind /data/NetworkManager/system-connections /etc/NetworkManager/system-connections
 ExecStop=/bin/umount /etc/NetworkManager/system-connections
 RemainAfterExit=yes

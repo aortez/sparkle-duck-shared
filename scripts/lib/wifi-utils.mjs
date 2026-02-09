@@ -8,6 +8,7 @@ import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { colors, log, info, success, warn, prompt, TEMP_PREFIX } from './cli-utils.mjs';
+import { getPartitionDevice } from './partition-utils.mjs';
 
 /**
  * Generate a NetworkManager connection file for WiFi.
@@ -129,7 +130,7 @@ export async function getWifiCredentials(credsFilePath) {
  * @param {boolean} dryRun - If true, only show what would happen.
  */
 export async function injectWifiCredentials(device, ssid, password, dryRun = false) {
-  const dataPartition = `${device}4`;
+  const dataPartition = getPartitionDevice(device, 4);
   const connectionContent = generateWifiConnection(ssid, password);
   // NetworkManager connection files use the SSID as filename.
   const filename = `${ssid}.nmconnection`;

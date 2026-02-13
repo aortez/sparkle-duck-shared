@@ -63,6 +63,7 @@ export {
   backupDataPartition,
   restoreDataPartition,
   cleanupBackup,
+  ensureGrowDataPartitionDependencies,
   growDataPartition,
   setHostname,
 } from './partition-utils.mjs';

@@ -14,7 +14,8 @@ Shared Yocto build infrastructure and flash utilities for Raspberry Pi projects 
 ## Projects Using This
 
 - [Inky Soup](https://github.com/yourorg/inky-soup) - Web-based e-ink display system
-- [Sparkle Duck (Dirt Sim)](https://github.com/yourorg/sparkle-duck) - Dirt simulation
+- [Dirt Sim](https://github.com/yourorg/sparkle-duck) - Physics and A-life simulator
+- [Matchbox Audio](https://github.com/aortez/matchbox-audio) - Small audio player
 
 ## Structure
 

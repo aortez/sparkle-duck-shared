@@ -92,8 +92,3 @@ Commercial use requires a separate license.
 See [LICENSE](LICENSE) for full terms.
 
 For commercial licensing inquiries: [Open an issue](https://github.com/aortez/sparkle-duck-shared/issues)
-
-## Development Status
-
-**Current:** Initial extraction complete - A/B boot, persistent data, flash utilities
-**Next:** Integration testing with inky-soup and sparkle-duck

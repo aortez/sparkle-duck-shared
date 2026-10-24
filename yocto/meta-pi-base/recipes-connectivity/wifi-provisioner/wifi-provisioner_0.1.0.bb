@@ -159,7 +159,7 @@ SRC_URI = " \
 "
 
 # Pin to the reviewed source for bounded setup windows and error notifications.
-SRCREV = "49879f265c35d46cd09737c762f0d97c230dfc01"
+SRCREV = "7003732be4183127f9f558d9916ddcd9ac628efe"
 S = "${WORKDIR}/git/wifi-provisioner"
 
 # Downgrade Cargo.lock from version 4 to version 3 for Rust 1.75 compatibility.

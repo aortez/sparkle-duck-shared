@@ -225,6 +225,8 @@ impl<W: WifiManager + 'static> BleManager<W> {
             }
         });
 
+        let mut auto_window = auto_start;
+        let mut next_wifi_check = Instant::now() + Duration::from_secs(2);
         let mut tick = tokio::time::interval(Duration::from_millis(100));
         loop {
             let request = tokio::select! {
@@ -240,7 +242,24 @@ impl<W: WifiManager + 'static> BleManager<W> {
                         Ok(())
                     }
                 };
+                if result.is_ok() {
+                    auto_window = false;
+                }
                 reply = Some((request.reply, result));
+            }
+            // NetworkManager may finish auto-connecting after the daemon starts.
+            // Close only a startup window; an explicit local Start remains intentional.
+            if auto_window && Instant::now() >= next_wifi_check {
+                next_wifi_check = Instant::now() + Duration::from_secs(5);
+                if let Ok(Ok(wifi)) =
+                    tokio::time::timeout(Duration::from_secs(3), self.wifi.status()).await
+                {
+                    let mut state = self.state.write().await;
+                    if wifi.connected && !state.busy {
+                        state.close();
+                        auto_window = false;
+                    }
+                }
             }
             let mut state = self.state.write().await;
             if state.deadline.is_some() && !state.authorized() {

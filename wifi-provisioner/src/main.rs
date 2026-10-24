@@ -33,6 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .await?
             .ok_or("Provisioner disconnected")??;
         let result: serde_json::Value = serde_json::from_str(response.to_text()?)?;
+        socket.close(None).await?;
         println!("{}", result);
         if result["ok"] != true {
             return Err("Provisioner command failed".into());

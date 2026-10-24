@@ -154,11 +154,11 @@ impl WifiManager for NmcliWifiManager {
         info!("Connecting to WiFi network: {}", ssid);
 
         // Try to connect. nmcli will create a connection profile if needed.
-        let result = self
-            .run_nmcli(&[
-                "--wait", "45", "device", "wifi", "connect", ssid, "password", password,
-            ])
-            .await;
+        let mut args = vec!["--wait", "45", "device", "wifi", "connect", ssid];
+        if !password.is_empty() {
+            args.extend(["password", password]);
+        }
+        let result = self.run_nmcli(&args).await;
 
         match result {
             Ok(output) => {

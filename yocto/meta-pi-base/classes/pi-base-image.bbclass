@@ -12,6 +12,10 @@
 #   BOOT_SIZE = "150"               # Boot partition size in MB
 #   ROOTFS_SIZE = "800"             # Root filesystem size in MB
 #   DATA_SIZE = "100"               # Data partition size in MB
+#   PERSISTENT_DATA_APP_DIR = "myapp"      # Required: app dir under /data
+#   PERSISTENT_DATA_APP_USER = "myuser"    # Required: owner user for /data/${PERSISTENT_DATA_APP_DIR}
+#   PERSISTENT_DATA_APP_GROUP = "mygroup"  # Optional: owner group (default: same as user)
+#   PERSISTENT_DATA_APP_MODE = "0755"      # Optional: chmod mode for app dir
 
 inherit core-image
 
@@ -21,6 +25,13 @@ python () {
     boot_device = d.getVar('BOOT_DEVICE')
     if not boot_device:
         bb.fatal("BOOT_DEVICE must be set in your image recipe. Use 'mmcblk0' for SD card or 'sda' for USB boot.")
+
+    app_dir = (d.getVar('PERSISTENT_DATA_APP_DIR') or "").strip()
+    app_user = (d.getVar('PERSISTENT_DATA_APP_USER') or "").strip()
+    if not app_dir or not app_user:
+        bb.fatal("PERSISTENT_DATA_APP_DIR and PERSISTENT_DATA_APP_USER must be set (e.g., via KAS local_conf_header).")
+    if app_dir.startswith('/') or '/' in app_dir or app_dir != app_dir.strip() or ' ' in app_dir:
+        bb.fatal("PERSISTENT_DATA_APP_DIR must be a single directory name under /data (no slashes or spaces).")
 }
 
 # Use A/B partition layout.

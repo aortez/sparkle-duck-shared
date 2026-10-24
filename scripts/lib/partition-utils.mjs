@@ -9,6 +9,21 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { log, info, success, warn, TEMP_PREFIX } from './cli-utils.mjs';
 
+const GROW_DATA_COMMAND_REQUIREMENTS = [
+  {
+    cmd: 'growpart',
+    installHint: 'Install cloud-utils-growpart (e.g. `sudo apt-get install cloud-utils-growpart`).',
+  },
+  {
+    cmd: 'e2fsck',
+    installHint: 'Install e2fsprogs (e.g. `sudo apt-get install e2fsprogs`).',
+  },
+  {
+    cmd: 'resize2fs',
+    installHint: 'Install e2fsprogs (e.g. `sudo apt-get install e2fsprogs`).',
+  },
+];
+
 function hasCommand(cmd) {
   try {
     execSync(`command -v ${cmd} >/dev/null 2>&1`, { stdio: 'pipe' });
@@ -225,6 +240,15 @@ export function cleanupBackup(backupDir) {
 }
 
 /**
+ * Validate host tool dependencies needed for growing/extending the data partition.
+ */
+export function ensureGrowDataPartitionDependencies() {
+  for (const requirement of GROW_DATA_COMMAND_REQUIREMENTS) {
+    requireCommand(requirement.cmd, requirement.installHint);
+  }
+}
+
+/**
  * Grow the data partition (partition 4) to fill the disk, leaving a percentage unallocated,
  * and then expand the ext4 filesystem to match.
  * @param {string} device - The disk device path (e.g., /dev/sdb).
@@ -247,9 +271,7 @@ export function growDataPartition(device, freePercent = 10, dryRun = false) {
     return;
   }
 
-  requireCommand('growpart', 'Install cloud-utils-growpart (e.g. `sudo apt-get install cloud-utils-growpart`).');
-  requireCommand('e2fsck', 'Install e2fsprogs (e.g. `sudo apt-get install e2fsprogs`).');
-  requireCommand('resize2fs', 'Install e2fsprogs (e.g. `sudo apt-get install e2fsprogs`).');
+  ensureGrowDataPartitionDependencies();
 
   // Ensure no partitions on the device are mounted (some desktops may automount them).
   try {

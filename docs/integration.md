@@ -44,6 +44,12 @@ inherit pi-base-image
 # "sda" for USB boot (Pi 4, Pi 5)
 BOOT_DEVICE = "mmcblk0"
 
+# Required: Configure the app-owned persistent directory under /data.
+# Set these via local.conf / KAS so they're available when building persistent-data.
+# PERSISTENT_DATA_APP_DIR = "myproject"
+# PERSISTENT_DATA_APP_USER = "myuser"
+# PERSISTENT_DATA_APP_GROUP = "mygroup"  # Optional (defaults to user)
+
 # Optional: Override defaults.
 HOSTNAME_DEFAULT = "myproject"
 # BOOT_SIZE = "150"

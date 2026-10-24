@@ -26,6 +26,13 @@ do_install() {
     install -d ${D}${sbindir}
     install -m 0755 ${WORKDIR}/persistent-data-init ${D}${sbindir}/persistent-data-init
 
+    # Substitute persistent app directory config.
+    # Values come from local.conf/KAS and are shared across the build.
+    sed -i "s|@PERSISTENT_DATA_APP_DIR@|${PERSISTENT_DATA_APP_DIR}|g" ${D}${sbindir}/persistent-data-init
+    sed -i "s|@PERSISTENT_DATA_APP_USER@|${PERSISTENT_DATA_APP_USER}|g" ${D}${sbindir}/persistent-data-init
+    sed -i "s|@PERSISTENT_DATA_APP_GROUP@|${PERSISTENT_DATA_APP_GROUP}|g" ${D}${sbindir}/persistent-data-init
+    sed -i "s|@PERSISTENT_DATA_APP_MODE@|${PERSISTENT_DATA_APP_MODE}|g" ${D}${sbindir}/persistent-data-init
+
     # Install systemd units.
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${WORKDIR}/data.mount ${D}${systemd_system_unitdir}/data.mount

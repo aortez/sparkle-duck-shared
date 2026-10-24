@@ -77,6 +77,8 @@ impl From<ImprovError> for u8 {
 pub mod capabilities {
     /// Device can identify itself (e.g., blink LED).
     pub const IDENTIFY: u8 = 0x01;
+    /// Device information can be read during setup.
+    pub const DEVICE_INFO: u8 = 0x02;
 }
 
 /// RPC command IDs.
@@ -128,7 +130,11 @@ impl std::fmt::Display for RpcError {
         match self {
             RpcError::TooShort => write!(f, "Packet too short"),
             RpcError::BadChecksum { expected, actual } => {
-                write!(f, "Bad checksum: expected {:#04x}, got {:#04x}", expected, actual)
+                write!(
+                    f,
+                    "Bad checksum: expected {:#04x}, got {:#04x}",
+                    expected, actual
+                )
             }
             RpcError::UnknownCommand(cmd) => write!(f, "Unknown command: {:#04x}", cmd),
             RpcError::LengthMismatch { expected, actual } => {

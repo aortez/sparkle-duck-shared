@@ -9,92 +9,60 @@ use serde_json::json;
 use tokio::net::TcpStream;
 use tokio::sync::RwLock;
 use tokio::time::timeout;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
 // Import from the crate.
 use wifi_provisioner::websocket::DaemonState;
 
-/// Helper to start test server on a random port.
+/// Exercise the production WebSocket server with a fake BLE controller.
 async fn start_test_server() -> SocketAddr {
-    let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    let actual_addr = listener.local_addr().unwrap();
-
-    let state = Arc::new(RwLock::new(DaemonState::default()));
-
-    // Spawn server task.
-    tokio::spawn(async move {
-        loop {
-            if let Ok((stream, _peer_addr)) = listener.accept().await {
-                let state = Arc::clone(&state);
-                tokio::spawn(async move {
-                    let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
-                    handle_test_connection(ws, state).await;
-                });
-            }
+    use wifi_provisioner::ble::ControlRequest;
+    use wifi_provisioner::protocol::{Network, State};
+    use wifi_provisioner::wifi::{WifiManager, WifiResult, WifiStatus};
+    struct TestWifi;
+    impl WifiManager for TestWifi {
+        async fn status(&self) -> WifiResult<WifiStatus> {
+            Ok(WifiStatus {
+                connected: false,
+                ssid: None,
+            })
         }
-    });
-
-    actual_addr
-}
-
-/// Simplified connection handler for tests.
-async fn handle_test_connection(
-    ws: WebSocketStream<TcpStream>,
-    state: Arc<RwLock<DaemonState>>,
-) {
-    use wifi_provisioner::protocol::{Command, ErrorResponse, OkResponse, Response, State, Network};
-
-    let (mut write, mut read) = ws.split();
-
-    while let Some(Ok(msg)) = read.next().await {
-        if let Message::Text(text) = msg {
-            let response = match serde_json::from_str::<Command>(&text) {
-                Ok(cmd) => match cmd {
-                    Command::Start { timeout } => {
-                        let mut s = state.write().await;
-                        s.state = State::Advertising;
-                        s.advertising_remaining = Some(timeout);
-                        Response::Ok(
-                            OkResponse::new(State::Advertising)
-                                .with_remaining(timeout)
-                                .with_wifi_connected(s.wifi_connected),
-                        )
-                    }
-                    Command::Stop => {
-                        let mut s = state.write().await;
-                        s.state = State::Idle;
-                        s.advertising_remaining = None;
-                        Response::Ok(OkResponse::new(State::Idle))
-                    }
-                    Command::Status => {
-                        let s = state.read().await;
-                        let mut resp = OkResponse::new(s.state)
-                            .with_wifi_connected(s.wifi_connected);
-                        if let Some(r) = s.advertising_remaining {
-                            resp = resp.with_remaining(r);
-                        }
-                        Response::Ok(resp)
-                    }
-                    Command::Scan => {
-                        let networks = vec![
-                            Network {
-                                ssid: "TestNetwork".into(),
-                                signal: -50,
-                                security: "wpa2".into(),
-                            },
-                        ];
-                        Response::Ok(OkResponse::new(State::Idle).with_networks(networks))
-                    }
-                },
-                Err(e) => Response::Error(ErrorResponse::new(format!("Invalid command: {}", e))),
-            };
-
-            let json = serde_json::to_string(&response).unwrap();
-            write.send(Message::Text(json.into())).await.unwrap();
+        async fn scan(&self) -> WifiResult<Vec<Network>> {
+            Ok(vec![Network {
+                ssid: "TestNetwork".into(),
+                signal: -50,
+                security: "wpa2".into(),
+            }])
+        }
+        async fn connect(&self, _: &str, _: &str) -> WifiResult<()> {
+            unreachable!()
         }
     }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let state = Arc::new(RwLock::new(DaemonState::default()));
+    let controller_state = Arc::clone(&state);
+    let (control, mut requests) = tokio::sync::mpsc::channel::<ControlRequest>(8);
+    tokio::spawn(async move {
+        while let Some(request) = requests.recv().await {
+            let mut state = controller_state.write().await;
+            state.state = if request.timeout.is_some() {
+                State::Advertising
+            } else {
+                State::Idle
+            };
+            state.advertising_remaining = request.timeout;
+            let _ = request.reply.send(Ok(()));
+        }
+    });
+    tokio::spawn(wifi_provisioner::websocket::run_listener(
+        listener,
+        state,
+        Arc::new(TestWifi),
+        control,
+    ));
+    address
 }
 
 /// Connect to WebSocket server.
@@ -242,4 +210,20 @@ async fn test_multiple_commands_same_connection() {
     assert_eq!(resp3["state"], "advertising");
     assert_eq!(resp4["state"], "idle");
     assert_eq!(resp5["state"], "idle");
+}
+
+#[tokio::test]
+async fn reject_browser_origin_and_unbounded_window() {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let address = start_test_server().await;
+    let mut request = format!("ws://{}", address).into_client_request().unwrap();
+    request
+        .headers_mut()
+        .insert("Origin", "https://example.com".parse().unwrap());
+    assert!(connect_async(request).await.is_err());
+    let mut ws = connect(address).await;
+    for seconds in [0, 301, u32::MAX] {
+        let response = send_command(&mut ws, json!({"cmd":"start", "timeout":seconds})).await;
+        assert_eq!(response["ok"], false);
+    }
 }

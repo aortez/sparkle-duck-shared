@@ -75,9 +75,10 @@ impl NmcliWifiManager {
 
     /// Run an nmcli command and return stdout.
     async fn run_nmcli(&self, args: &[&str]) -> WifiResult<String> {
-        debug!("Running: nmcli {}", args.join(" "));
+        debug!("Running nmcli operation");
 
         let output = Command::new("nmcli")
+            .kill_on_drop(true)
             .args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -105,7 +106,14 @@ impl WifiManager for NmcliWifiManager {
     async fn status(&self) -> WifiResult<WifiStatus> {
         // Check for active WiFi connections.
         let output = self
-            .run_nmcli(&["-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"])
+            .run_nmcli(&[
+                "-t",
+                "-f",
+                "NAME,TYPE,DEVICE",
+                "connection",
+                "show",
+                "--active",
+            ])
             .await?;
 
         // Look for a wifi connection.
@@ -148,7 +156,7 @@ impl WifiManager for NmcliWifiManager {
         // Try to connect. nmcli will create a connection profile if needed.
         let result = self
             .run_nmcli(&[
-                "device", "wifi", "connect", ssid, "password", password,
+                "--wait", "45", "device", "wifi", "connect", ssid, "password", password,
             ])
             .await;
 
@@ -384,8 +392,8 @@ mod tests {
         let output = "net100:100:WPA2\nnet50:50:WPA2\nnet0:0:WPA2\n";
         let networks = parse_scan_output(output);
 
-        assert_eq!(networks[0].signal, 0);    // -100 + 100
-        assert_eq!(networks[1].signal, -50);  // -100 + 50
+        assert_eq!(networks[0].signal, 0); // -100 + 100
+        assert_eq!(networks[1].signal, -50); // -100 + 50
         assert_eq!(networks[2].signal, -100); // -100 + 0
     }
 }

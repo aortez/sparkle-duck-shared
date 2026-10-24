@@ -14,7 +14,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda
 
 # Source: git repository + crate dependencies.
 SRC_URI = " \
-    git://github.com/aortez/sparkle-duck-shared.git;protocol=https;branch=main \
+    git://github.com/aortez/sparkle-duck-shared.git;protocol=https;nobranch=1 \
     crate://crates.io/aho-corasick/1.1.4 \
     crate://crates.io/async-stream-impl/0.3.6 \
     crate://crates.io/async-stream/0.3.6 \
@@ -158,8 +158,8 @@ SRC_URI = " \
     crate://crates.io/zmij/1.0.2 \
 "
 
-# Pin to the commit with BLE notification and boot fixes.
-SRCREV = "c47c953fcb41a4b8945bc315cb1704a9a97004ed"
+# Pin to the reviewed source for bounded setup windows and error notifications.
+SRCREV = "49879f265c35d46cd09737c762f0d97c230dfc01"
 S = "${WORKDIR}/git/wifi-provisioner"
 
 # Downgrade Cargo.lock from version 4 to version 3 for Rust 1.75 compatibility.

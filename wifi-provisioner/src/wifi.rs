@@ -75,9 +75,10 @@ impl NmcliWifiManager {
 
     /// Run an nmcli command and return stdout.
     async fn run_nmcli(&self, args: &[&str]) -> WifiResult<String> {
-        debug!("Running: nmcli {}", args.join(" "));
+        debug!("Running nmcli operation");
 
         let output = Command::new("nmcli")
+            .kill_on_drop(true)
             .args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -105,27 +106,17 @@ impl WifiManager for NmcliWifiManager {
     async fn status(&self) -> WifiResult<WifiStatus> {
         // Check for active WiFi connections.
         let output = self
-            .run_nmcli(&["-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"])
+            .run_nmcli(&[
+                "-t",
+                "-f",
+                "NAME,TYPE,DEVICE",
+                "connection",
+                "show",
+                "--active",
+            ])
             .await?;
 
-        // Look for a wifi connection.
-        for line in output.lines() {
-            let parts: Vec<&str> = line.split(':').collect();
-            if parts.len() >= 2 && parts[1] == "802-11-wireless" {
-                let ssid = parts[0].to_string();
-                info!("WiFi connected to: {}", ssid);
-                return Ok(WifiStatus {
-                    connected: true,
-                    ssid: Some(ssid),
-                });
-            }
-        }
-
-        info!("WiFi not connected");
-        Ok(WifiStatus {
-            connected: false,
-            ssid: None,
-        })
+        Ok(parse_active_connections(&output))
     }
 
     async fn scan(&self) -> WifiResult<Vec<Network>> {
@@ -146,11 +137,11 @@ impl WifiManager for NmcliWifiManager {
         info!("Connecting to WiFi network: {}", ssid);
 
         // Try to connect. nmcli will create a connection profile if needed.
-        let result = self
-            .run_nmcli(&[
-                "device", "wifi", "connect", ssid, "password", password,
-            ])
-            .await;
+        let mut args = vec!["--wait", "45", "device", "wifi", "connect", ssid];
+        if !password.is_empty() {
+            args.extend(["password", password]);
+        }
+        let result = self.run_nmcli(&args).await;
 
         match result {
             Ok(output) => {
@@ -174,6 +165,47 @@ impl WifiManager for NmcliWifiManager {
     }
 }
 
+/// nmcli terse output escapes field separators and literal backslashes.
+fn parse_nmcli_fields(line: &str) -> Vec<String> {
+    let mut fields = vec![String::new()];
+    let mut escaped = false;
+    for ch in line.chars() {
+        if escaped {
+            fields.last_mut().unwrap().push(ch);
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == ':' {
+            fields.push(String::new());
+        } else {
+            fields.last_mut().unwrap().push(ch);
+        }
+    }
+    if escaped {
+        fields.last_mut().unwrap().push('\\');
+    }
+    fields
+}
+
+fn parse_active_connections(output: &str) -> WifiStatus {
+    for line in output.lines() {
+        let parts = parse_nmcli_fields(line);
+        if parts.len() >= 2 && parts[1] == "802-11-wireless" {
+            let ssid = parts[0].to_string();
+            info!("WiFi connected to: {}", ssid);
+            return WifiStatus {
+                connected: true,
+                ssid: Some(ssid),
+            };
+        }
+    }
+    info!("WiFi not connected");
+    WifiStatus {
+        connected: false,
+        ssid: None,
+    }
+}
+
 /// Parse nmcli wifi list output into Network structs.
 ///
 /// Input format (terse mode): `SSID:SIGNAL:SECURITY`
@@ -187,10 +219,8 @@ pub fn parse_scan_output(output: &str) -> Vec<Network> {
             continue;
         }
 
-        // Split on colon, but SSID might be empty or contain special chars.
-        // Format: SSID:SIGNAL:SECURITY
-        // We need at least 3 parts.
-        let parts: Vec<&str> = line.splitn(3, ':').collect();
+        // Format: SSID:SIGNAL:SECURITY, with escaped separators in SSIDs.
+        let parts = parse_nmcli_fields(line);
         if parts.len() < 3 {
             debug!("Skipping malformed line: {}", line);
             continue;
@@ -221,7 +251,7 @@ pub fn parse_scan_output(output: &str) -> Vec<Network> {
         };
 
         // Normalize security string.
-        let security = normalize_security(parts[2]);
+        let security = normalize_security(&parts[2]);
 
         seen_ssids.insert(ssid.clone());
         networks.push(Network {
@@ -304,6 +334,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn connected_profile_with_escaped_name_stays_connected() {
+        let status = parse_active_connections(
+            "USB:802-3-ethernet:usb0\nStudio\\:West\\\\Frame:802-11-wireless:wlan0\n",
+        );
+        assert!(status.connected);
+        assert_eq!(status.ssid.as_deref(), Some("Studio:West\\Frame"));
+    }
+
+    #[test]
+    fn scan_preserves_colons_and_backslashes_in_ssids() {
+        let networks = parse_scan_output("Studio\\:West\\\\Frame:72:WPA2\n");
+        assert_eq!(networks.len(), 1);
+        assert_eq!(networks[0].ssid, "Studio:West\\Frame");
+        assert_eq!(networks[0].signal, -28);
+    }
+
+    #[test]
     fn parse_basic_scan_output() {
         let output = "turtleback:72:WPA1\nonionchan:65:WPA1 WPA2\n";
         let networks = parse_scan_output(output);
@@ -384,8 +431,8 @@ mod tests {
         let output = "net100:100:WPA2\nnet50:50:WPA2\nnet0:0:WPA2\n";
         let networks = parse_scan_output(output);
 
-        assert_eq!(networks[0].signal, 0);    // -100 + 100
-        assert_eq!(networks[1].signal, -50);  // -100 + 50
+        assert_eq!(networks[0].signal, 0); // -100 + 100
+        assert_eq!(networks[1].signal, -50); // -100 + 50
         assert_eq!(networks[2].signal, -100); // -100 + 0
     }
 }

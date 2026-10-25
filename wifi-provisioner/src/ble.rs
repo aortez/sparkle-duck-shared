@@ -5,7 +5,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::protocol::State;
+use crate::websocket::DaemonState;
 use bluer::adv::Advertisement;
+use bluer::adv::AdvertisementHandle;
 use bluer::gatt::local::{
     characteristic_control, Application, Characteristic, CharacteristicControl,
     CharacteristicControlEvent, CharacteristicNotify, CharacteristicNotifyMethod,
@@ -14,12 +17,13 @@ use bluer::gatt::local::{
 use bluer::gatt::CharacteristicWriter;
 use bluer::{Adapter, Session};
 use futures_util::StreamExt;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, oneshot, watch, RwLock};
+use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 
 use crate::improv::{
-    build_device_info_response, build_provision_response, build_response, build_scan_response,
-    capabilities, characteristic, ImprovError, ImprovState, RpcCommand, RpcRequest, SERVICE_UUID,
+    build_device_info_response, build_provision_response, build_scan_response, capabilities,
+    characteristic, ImprovError, ImprovState, RpcCommand, RpcRequest, SERVICE_UUID,
 };
 use crate::wifi::WifiManager;
 
@@ -61,32 +65,84 @@ pub struct BleState {
     pub advertising: bool,
     /// Active RPC result writer for sending notifications to subscribed clients.
     pub rpc_result_notifier: Option<CharacteristicWriter>,
+    deadline: Option<Instant>,
+    generation: u64,
+    busy: bool,
+    cancel: watch::Sender<u64>,
+    state_changes: watch::Sender<u8>,
+    error_changes: watch::Sender<u8>,
 }
 
 impl Default for BleState {
     fn default() -> Self {
         Self {
-            // Start authorized (no auth required for now).
-            improv_state: ImprovState::Authorized,
+            // An explicit, bounded setup window authorizes credentials.
+            improv_state: ImprovState::AuthorizationRequired,
             error_state: ImprovError::None,
             rpc_result: Vec::new(),
             advertising: false,
             rpc_result_notifier: None,
+            deadline: None,
+            generation: 0,
+            busy: false,
+            cancel: watch::channel(0).0,
+            state_changes: watch::channel(ImprovState::AuthorizationRequired.into()).0,
+            error_changes: watch::channel(ImprovError::None.into()).0,
         }
     }
 }
 
-/// Events from BLE to main application.
-#[derive(Debug)]
-pub enum BleEvent {
-    /// Client requested identify (blink LED, etc.).
-    Identify,
-    /// Client connected.
-    ClientConnected,
-    /// Client disconnected.
-    ClientDisconnected,
-    /// Provisioning succeeded with this URL.
-    ProvisioningComplete(String),
+/// Requests from trusted local applications. Replies follow the hardware change.
+pub struct ControlRequest {
+    pub timeout: Option<u32>,
+    pub reply: oneshot::Sender<Result<(), String>>,
+}
+
+impl BleState {
+    fn status(&mut self, phase: ImprovState, error: ImprovError) {
+        self.improv_state = phase;
+        self.error_state = error;
+        self.state_changes.send_replace(phase.into());
+        self.error_changes.send_replace(error.into());
+    }
+
+    fn authorized(&self) -> bool {
+        self.deadline
+            .is_some_and(|deadline| Instant::now() < deadline)
+    }
+
+    fn close(&mut self) {
+        self.deadline = None;
+        self.busy = false;
+        self.generation += 1;
+        self.cancel.send_replace(self.generation);
+        self.status(
+            ImprovState::AuthorizationRequired,
+            ImprovError::NotAuthorized,
+        );
+    }
+}
+
+fn notify_changes(sender: watch::Sender<u8>) -> CharacteristicNotify {
+    CharacteristicNotify {
+        notify: true,
+        method: CharacteristicNotifyMethod::Fun(Box::new(move |mut notifier| {
+            let mut changes = sender.subscribe();
+            Box::pin(async move {
+                loop {
+                    let value = *changes.borrow_and_update();
+                    if notifier.notify(vec![value]).await.is_err() {
+                        break;
+                    }
+                    tokio::select! {
+                        result = changes.changed() => if result.is_err() { break; },
+                        _ = notifier.stopped() => break,
+                    }
+                }
+            })
+        })),
+        ..Default::default()
+    }
 }
 
 /// BLE manager for Improv WiFi.
@@ -94,21 +150,15 @@ pub struct BleManager<W: WifiManager> {
     config: BleConfig,
     state: Arc<RwLock<BleState>>,
     wifi: Arc<W>,
-    event_tx: mpsc::Sender<BleEvent>,
 }
 
 impl<W: WifiManager + 'static> BleManager<W> {
     /// Create a new BLE manager.
-    pub fn new(
-        config: BleConfig,
-        wifi: Arc<W>,
-        event_tx: mpsc::Sender<BleEvent>,
-    ) -> Self {
+    pub fn new(config: BleConfig, wifi: Arc<W>) -> Self {
         Self {
             config,
             state: Arc::new(RwLock::new(BleState::default())),
             wifi,
-            event_tx,
         }
     }
 
@@ -124,7 +174,12 @@ impl<W: WifiManager + 'static> BleManager<W> {
     /// 2. Register the Improv WiFi GATT service
     /// 3. Start advertising
     /// 4. Handle incoming connections and commands
-    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn run(
+        &self,
+        mut requests: mpsc::Receiver<ControlRequest>,
+        daemon: Arc<RwLock<DaemonState>>,
+        auto_start: bool,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!("Initializing BLE...");
 
         // Connect to BlueZ.
@@ -147,8 +202,10 @@ impl<W: WifiManager + 'static> BleManager<W> {
 
         info!("GATT application registered");
 
-        // Start advertising.
-        self.start_advertising(&adapter).await?;
+        let mut advertising = None;
+        if auto_start {
+            self.open_window(&adapter, &mut advertising, 300).await?;
+        }
 
         // Spawn task to handle RPC result notification subscriptions.
         let state_for_notify = Arc::clone(&self.state);
@@ -168,46 +225,112 @@ impl<W: WifiManager + 'static> BleManager<W> {
             }
         });
 
-        // Keep the application running.
-        info!("BLE server running, waiting for connections...");
-
-        // Wait forever (the handles keep things alive).
+        let mut auto_window = auto_start;
+        let mut next_wifi_check = Instant::now() + Duration::from_secs(2);
+        let mut tick = tokio::time::interval(Duration::from_millis(100));
         loop {
-            tokio::time::sleep(Duration::from_secs(3600)).await;
+            let request = tokio::select! {
+                request = requests.recv() => match request { Some(r) => Some(r), None => break },
+                _ = tick.tick() => None,
+            };
+            let mut reply = None;
+            if let Some(request) = request {
+                let result = match request.timeout {
+                    Some(timeout) => self.open_window(&adapter, &mut advertising, timeout).await,
+                    None => {
+                        self.state.write().await.close();
+                        Ok(())
+                    }
+                };
+                if result.is_ok() {
+                    auto_window = false;
+                }
+                reply = Some((request.reply, result));
+            }
+            // NetworkManager may finish auto-connecting after the daemon starts.
+            // Close only a startup window; an explicit local Start remains intentional.
+            if auto_window && Instant::now() >= next_wifi_check {
+                next_wifi_check = Instant::now() + Duration::from_secs(5);
+                if let Ok(Ok(wifi)) =
+                    tokio::time::timeout(Duration::from_secs(3), self.wifi.status()).await
+                {
+                    let mut state = self.state.write().await;
+                    if wifi.connected && !state.busy {
+                        state.close();
+                        auto_window = false;
+                    }
+                }
+            }
+            let mut state = self.state.write().await;
+            if state.deadline.is_some() && !state.authorized() {
+                state.close();
+            }
+            if state.deadline.is_none() {
+                // Dropping the BlueZ handle unregisters the actual advertisement.
+                advertising.take();
+                state.advertising = false;
+            }
+            let mut status = daemon.write().await;
+            status.state = if state.busy {
+                State::Provisioning
+            } else if state.advertising {
+                State::Advertising
+            } else {
+                State::Idle
+            };
+            status.advertising_remaining = state.deadline.map(|deadline| {
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .as_secs()
+                    .saturating_add(1) as u32
+            });
+            if state.improv_state == ImprovState::Provisioned {
+                status.wifi_connected = true;
+            }
+            drop(status);
+            drop(state);
+            if let Some((reply, result)) = reply {
+                let _ = reply.send(result);
+            }
         }
-
-        // Cleanup (unreachable but good practice).
-        #[allow(unreachable_code)]
-        {
-            drop(_app_handle);
-            Ok(())
-        }
+        self.state.write().await.close();
+        drop(advertising);
+        Ok(())
     }
 
-    /// Start BLE advertising.
-    pub async fn start_advertising(
+    async fn open_window(
         &self,
         adapter: &Adapter,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let adv = Advertisement {
-            service_uuids: vec![SERVICE_UUID].into_iter().collect(),
-            local_name: Some(self.config.device_name.clone()),
-            discoverable: Some(true),
-            ..Default::default()
-        };
-
-        let _handle = adapter.advertise(adv).await?;
-        info!("BLE advertising started as '{}'", self.config.device_name);
-
-        {
-            let mut state = self.state.write().await;
-            state.advertising = true;
+        advertising: &mut Option<AdvertisementHandle>,
+        timeout: u32,
+    ) -> Result<(), String> {
+        if !(1..=300).contains(&timeout) {
+            return Err("Setup timeout must be 1–300 seconds".into());
         }
-
-        // Keep the handle alive by leaking it.
-        // In a real app, we'd store this handle to stop advertising later.
-        std::mem::forget(_handle);
-
+        let mut state = self.state.write().await;
+        if state.busy {
+            return Err("WiFi connection attempt is already in progress".into());
+        }
+        if advertising.is_none() {
+            let adv = Advertisement {
+                service_uuids: vec![SERVICE_UUID].into_iter().collect(),
+                local_name: Some(self.config.device_name.clone()),
+                discoverable: Some(true),
+                ..Default::default()
+            };
+            *advertising = Some(
+                adapter
+                    .advertise(adv)
+                    .await
+                    .map_err(|error| error.to_string())?,
+            );
+        }
+        state.close();
+        state.deadline = Some(Instant::now() + Duration::from_secs(timeout.into()));
+        state.advertising = true;
+        state.rpc_result.clear();
+        state.status(ImprovState::Authorized, ImprovError::None);
+        info!("BLE setup open for {} seconds", timeout);
         Ok(())
     }
 
@@ -219,7 +342,6 @@ impl<W: WifiManager + 'static> BleManager<W> {
         let state = Arc::clone(&self.state);
         let config = self.config.clone();
         let wifi = Arc::clone(&self.wifi);
-        let event_tx = self.event_tx.clone();
 
         // Capabilities characteristic - read only.
         let capabilities_read = {
@@ -227,8 +349,8 @@ impl<W: WifiManager + 'static> BleManager<W> {
                 read: true,
                 fun: Box::new(move |_req| {
                     Box::pin(async move {
-                        // We support identify.
-                        Ok(vec![capabilities::IDENTIFY])
+                        // Device info is supported; Identify has no physical implementation.
+                        Ok(vec![capabilities::DEVICE_INFO])
                     })
                 }),
                 ..Default::default()
@@ -284,7 +406,6 @@ impl<W: WifiManager + 'static> BleManager<W> {
         let state_for_cmd = Arc::clone(&state);
         let wifi_for_cmd = Arc::clone(&wifi);
         let config_for_cmd = config.clone();
-        let event_tx_for_cmd = event_tx.clone();
 
         let rpc_command_write = CharacteristicWrite {
             write: true,
@@ -292,16 +413,20 @@ impl<W: WifiManager + 'static> BleManager<W> {
                 let state = Arc::clone(&state_for_cmd);
                 let wifi = Arc::clone(&wifi_for_cmd);
                 let config = config_for_cmd.clone();
-                let event_tx = event_tx_for_cmd.clone();
 
                 Box::pin(async move {
-                    handle_rpc_command(&new_value, state, wifi, &config, event_tx).await;
+                    // Acknowledge the GATT write before NetworkManager's potentially slow work.
+                    tokio::spawn(async move {
+                        handle_rpc_command(&new_value, state, wifi, &config).await;
+                    });
                     Ok(())
                 })
             })),
             ..Default::default()
         };
 
+        let current_state_notify = notify_changes(state.read().await.state_changes.clone());
+        let error_state_notify = notify_changes(state.read().await.error_changes.clone());
         let app = Application {
             services: vec![Service {
                 uuid: SERVICE_UUID,
@@ -317,26 +442,14 @@ impl<W: WifiManager + 'static> BleManager<W> {
                     Characteristic {
                         uuid: characteristic::CURRENT_STATE,
                         read: Some(current_state_read),
-                        notify: Some(CharacteristicNotify {
-                            notify: true,
-                            method: CharacteristicNotifyMethod::Fun(Box::new(|_| {
-                                Box::pin(async {})
-                            })),
-                            ..Default::default()
-                        }),
+                        notify: Some(current_state_notify),
                         ..Default::default()
                     },
                     // Error State (read + notify).
                     Characteristic {
                         uuid: characteristic::ERROR_STATE,
                         read: Some(error_state_read),
-                        notify: Some(CharacteristicNotify {
-                            notify: true,
-                            method: CharacteristicNotifyMethod::Fun(Box::new(|_| {
-                                Box::pin(async {})
-                            })),
-                            ..Default::default()
-                        }),
+                        notify: Some(error_state_notify),
                         ..Default::default()
                     },
                     // RPC Command (write).
@@ -384,8 +497,11 @@ async fn send_rpc_notification(state: &Arc<RwLock<BleState>>, response: &[u8]) {
     let mut s = state.write().await;
     if let Some(ref mut writer) = s.rpc_result_notifier {
         debug!("Sending RPC result notification ({} bytes)", response.len());
-        if let Err(e) = writer.send(response).await {
-            warn!("Failed to send RPC result notification: {}", e);
+        if !matches!(
+            tokio::time::timeout(Duration::from_secs(2), writer.send(response)).await,
+            Ok(Ok(()))
+        ) {
+            warn!("RPC notification failed; result remains readable");
         }
     }
 }
@@ -396,9 +512,8 @@ async fn handle_rpc_command<W: WifiManager>(
     state: Arc<RwLock<BleState>>,
     wifi: Arc<W>,
     config: &BleConfig,
-    event_tx: mpsc::Sender<BleEvent>,
 ) {
-    debug!("Received RPC command: {:?}", data);
+    debug!("Received RPC command ({} bytes)", data.len());
 
     // Parse the RPC packet.
     let request = match RpcRequest::parse(data) {
@@ -406,7 +521,8 @@ async fn handle_rpc_command<W: WifiManager>(
         Err(e) => {
             error!("Failed to parse RPC command: {}", e);
             let mut s = state.write().await;
-            s.error_state = ImprovError::InvalidRpc;
+            let phase = s.improv_state;
+            s.status(phase, ImprovError::InvalidRpc);
             return;
         }
     };
@@ -415,16 +531,9 @@ async fn handle_rpc_command<W: WifiManager>(
 
     match request.command {
         RpcCommand::Identify => {
-            // Send identify event to main app.
-            let _ = event_tx.send(BleEvent::Identify).await;
-
-            // Send empty response to acknowledge.
-            let response = build_response(RpcCommand::Identify, &[]);
-            {
-                let mut s = state.write().await;
-                s.rpc_result = response.clone();
-            }
-            send_rpc_notification(&state, &response).await;
+            let mut s = state.write().await;
+            let phase = s.improv_state;
+            s.status(phase, ImprovError::UnknownCommand);
         }
 
         RpcCommand::GetDeviceInfo => {
@@ -438,7 +547,8 @@ async fn handle_rpc_command<W: WifiManager>(
             {
                 let mut s = state.write().await;
                 s.rpc_result = response.clone();
-                s.error_state = ImprovError::None;
+                let phase = s.improv_state;
+                s.status(phase, ImprovError::None);
             }
             send_rpc_notification(&state, &response).await;
         }
@@ -447,7 +557,8 @@ async fn handle_rpc_command<W: WifiManager>(
             // Update state to show we're busy.
             {
                 let mut s = state.write().await;
-                s.error_state = ImprovError::None;
+                let phase = s.improv_state;
+                s.status(phase, ImprovError::None);
             }
 
             // Perform the scan.
@@ -469,58 +580,68 @@ async fn handle_rpc_command<W: WifiManager>(
                 Err(e) => {
                     error!("WiFi scan failed: {}", e);
                     let mut s = state.write().await;
-                    s.error_state = ImprovError::Unknown;
+                    let phase = s.improv_state;
+                    s.status(phase, ImprovError::Unknown);
                 }
             }
         }
 
         RpcCommand::SendWifiSettings => {
-            // Parse credentials.
+            let (generation, deadline, mut cancelled) = {
+                let mut s = state.write().await;
+                if !s.authorized() || s.busy {
+                    let phase = s.improv_state;
+                    s.status(phase, ImprovError::NotAuthorized);
+                    return;
+                }
+                s.busy = true;
+                s.rpc_result.clear();
+                s.status(ImprovState::Provisioning, ImprovError::None);
+                (s.generation, s.deadline.unwrap(), s.cancel.subscribe())
+            };
             let creds = match request.parse_wifi_credentials() {
-                Ok(c) => c,
-                Err(e) => {
-                    error!("Failed to parse WiFi credentials: {}", e);
+                Ok(creds)
+                    if !creds.ssid.is_empty()
+                        && creds.ssid.len() <= 32
+                        && creds.password.len() <= 64 =>
+                {
+                    creds
+                }
+                _ => {
                     let mut s = state.write().await;
-                    s.error_state = ImprovError::InvalidRpc;
+                    if s.generation == generation {
+                        s.busy = false;
+                        s.status(ImprovState::Authorized, ImprovError::InvalidRpc);
+                    }
                     return;
                 }
             };
-
-            info!("Attempting to connect to WiFi: {}", creds.ssid);
-
-            // Update state to provisioning.
-            {
-                let mut s = state.write().await;
-                s.improv_state = ImprovState::Provisioning;
-                s.error_state = ImprovError::None;
+            let result = tokio::select! {
+                result = wifi.connect(&creds.ssid, &creds.password) => Some(result),
+                _ = tokio::time::sleep_until(deadline) => None,
+                _ = cancelled.changed() => None,
+            };
+            let mut s = state.write().await;
+            if s.generation != generation {
+                return;
             }
-
-            // Attempt to connect.
-            match wifi.connect(&creds.ssid, &creds.password).await {
+            s.busy = false;
+            if !s.authorized() || result.is_none() {
+                s.close();
+                return;
+            }
+            match result.unwrap() {
                 Ok(()) => {
-                    info!("Successfully connected to WiFi: {}", creds.ssid);
-
                     let response = build_provision_response(&config.redirect_url);
-
-                    {
-                        let mut s = state.write().await;
-                        s.improv_state = ImprovState::Provisioned;
-                        s.rpc_result = response.clone();
-                    }
-
-                    // Send the notification BEFORE emitting the event.
+                    s.rpc_result = response.clone();
+                    s.deadline = None;
+                    s.status(ImprovState::Provisioned, ImprovError::None);
+                    drop(s);
                     send_rpc_notification(&state, &response).await;
-
-                    let _ = event_tx
-                        .send(BleEvent::ProvisioningComplete(config.redirect_url.clone()))
-                        .await;
                 }
-                Err(e) => {
-                    error!("Failed to connect to WiFi: {}", e);
-
-                    let mut s = state.write().await;
-                    s.improv_state = ImprovState::Authorized;
-                    s.error_state = ImprovError::UnableToConnect;
+                Err(_) => {
+                    // Let the client correct the credentials while this setup window is open.
+                    s.status(ImprovState::Authorized, ImprovError::UnableToConnect);
                 }
             }
         }
@@ -529,7 +650,149 @@ async fn handle_rpc_command<W: WifiManager>(
             // Hostname setting not implemented yet.
             warn!("Hostname command not implemented");
             let mut s = state.write().await;
-            s.error_state = ImprovError::UnknownCommand;
+            let phase = s.improv_state;
+            s.status(phase, ImprovError::UnknownCommand);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::improv::build_response;
+    use crate::protocol::Network;
+    use crate::wifi::{MockWifiManager, WifiResult, WifiStatus};
+
+    async fn open_state() -> Arc<RwLock<BleState>> {
+        let state = Arc::new(RwLock::new(BleState::default()));
+        {
+            let mut s = state.write().await;
+            s.deadline = Some(Instant::now() + Duration::from_secs(30));
+            s.status(ImprovState::Authorized, ImprovError::None);
+        }
+        state
+    }
+
+    fn credentials() -> Vec<u8> {
+        build_response(
+            RpcCommand::SendWifiSettings,
+            &["Test network", "test-only-password"],
+        )
+    }
+
+    #[tokio::test]
+    async fn closed_or_expired_setup_rejects_credentials() {
+        for expired in [false, true] {
+            let state = Arc::new(RwLock::new(BleState::default()));
+            if expired {
+                state.write().await.deadline = Some(Instant::now());
+            }
+            handle_rpc_command(
+                &credentials(),
+                Arc::clone(&state),
+                Arc::new(MockWifiManager::default()),
+                &BleConfig::default(),
+            )
+            .await;
+            let s = state.read().await;
+            assert_eq!(s.error_state, ImprovError::NotAuthorized);
+            assert_ne!(s.improv_state, ImprovState::Provisioned);
+        }
+    }
+
+    #[tokio::test]
+    async fn failure_notifies_and_allows_corrected_credentials() {
+        let state = open_state().await;
+        let mut errors = state.read().await.error_changes.subscribe();
+        let wifi = MockWifiManager {
+            connect_result: Err("test failure".into()),
+            ..MockWifiManager::default()
+        };
+        handle_rpc_command(
+            &credentials(),
+            Arc::clone(&state),
+            Arc::new(wifi),
+            &BleConfig::default(),
+        )
+        .await;
+        errors.changed().await.unwrap();
+        assert_eq!(*errors.borrow(), u8::from(ImprovError::UnableToConnect));
+        assert_eq!(state.read().await.improv_state, ImprovState::Authorized);
+        handle_rpc_command(
+            &credentials(),
+            Arc::clone(&state),
+            Arc::new(MockWifiManager::default()),
+            &BleConfig::default(),
+        )
+        .await;
+        assert_eq!(state.read().await.improv_state, ImprovState::Provisioned);
+        assert!(!state.read().await.authorized());
+        // A known Bluetooth peer cannot reprovision after success.
+        handle_rpc_command(
+            &credentials(),
+            Arc::clone(&state),
+            Arc::new(MockWifiManager::default()),
+            &BleConfig::default(),
+        )
+        .await;
+        assert_eq!(state.read().await.error_state, ImprovError::NotAuthorized);
+    }
+
+    struct BlockedWifi {
+        entered: tokio::sync::Notify,
+    }
+    impl WifiManager for BlockedWifi {
+        async fn status(&self) -> WifiResult<WifiStatus> {
+            Ok(WifiStatus {
+                connected: false,
+                ssid: None,
+            })
+        }
+        async fn scan(&self) -> WifiResult<Vec<Network>> {
+            Ok(vec![])
+        }
+        async fn connect(&self, _: &str, _: &str) -> WifiResult<()> {
+            self.entered.notify_one();
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_cancels_inflight_work_and_prevents_late_success() {
+        let state = open_state().await;
+        let wifi = Arc::new(BlockedWifi {
+            entered: tokio::sync::Notify::new(),
+        });
+        let task_state = Arc::clone(&state);
+        let task_wifi = Arc::clone(&wifi);
+        let task = tokio::spawn(async move {
+            handle_rpc_command(&credentials(), task_state, task_wifi, &BleConfig::default()).await;
+        });
+        wifi.entered.notified().await;
+        state.write().await.close();
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            state.read().await.improv_state,
+            ImprovState::AuthorizationRequired
+        );
+        assert!(state.read().await.rpc_result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn busy_session_rejects_second_connection_attempt() {
+        let state = open_state().await;
+        state.write().await.busy = true;
+        handle_rpc_command(
+            &credentials(),
+            Arc::clone(&state),
+            Arc::new(MockWifiManager::default()),
+            &BleConfig::default(),
+        )
+        .await;
+        assert_eq!(state.read().await.error_state, ImprovError::NotAuthorized);
+        assert!(state.read().await.busy);
     }
 }

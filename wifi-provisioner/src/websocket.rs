@@ -5,9 +5,10 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use crate::ble::ControlRequest;
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 
@@ -49,6 +50,7 @@ impl Default for ServerConfig {
 struct HandlerContext<W: WifiManager> {
     state: Arc<RwLock<DaemonState>>,
     wifi: Arc<W>,
+    control: mpsc::Sender<ControlRequest>,
 }
 
 /// Run the WebSocket server.
@@ -58,11 +60,26 @@ pub async fn run_server<W: WifiManager + 'static>(
     config: ServerConfig,
     state: Arc<RwLock<DaemonState>>,
     wifi: Arc<W>,
+    control: mpsc::Sender<ControlRequest>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let listener = TcpListener::bind(&config.addr).await?;
     info!("WebSocket server listening on {}", config.addr);
 
-    let ctx = Arc::new(HandlerContext { state, wifi });
+    run_listener(listener, state, wifi, control).await
+}
+
+/// Run on an existing listener, including an ephemeral port in integration tests.
+pub async fn run_listener<W: WifiManager + 'static>(
+    listener: TcpListener,
+    state: Arc<RwLock<DaemonState>>,
+    wifi: Arc<W>,
+    control: mpsc::Sender<ControlRequest>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let ctx = Arc::new(HandlerContext {
+        state,
+        wifi,
+        control,
+    });
 
     loop {
         match listener.accept().await {
@@ -87,7 +104,22 @@ async fn handle_connection<W: WifiManager>(
     addr: SocketAddr,
     ctx: Arc<HandlerContext<W>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let ws_stream = tokio_tungstenite::accept_async(stream).await?;
+    // This is local IPC, not a browser API. A website must not open a setup window.
+    let ws_stream = tokio_tungstenite::accept_hdr_async(
+        stream,
+        |request: &tokio_tungstenite::tungstenite::handshake::server::Request, response| {
+            if request.headers().contains_key("origin") {
+                let mut denied =
+                    tokio_tungstenite::tungstenite::handshake::server::ErrorResponse::new(Some(
+                        "Browser access is not allowed".into(),
+                    ));
+                *denied.status_mut() = tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN;
+                return Err(denied);
+            }
+            Ok(response)
+        },
+    )
+    .await?;
     info!("New WebSocket connection from {}", addr);
 
     let (mut write, mut read) = ws_stream.split();
@@ -154,32 +186,31 @@ async fn handle_command<W: WifiManager>(text: &str, ctx: &HandlerContext<W>) -> 
 
 /// Handle the "start" command - begin BLE advertising.
 async fn handle_start<W: WifiManager>(timeout: u32, ctx: &HandlerContext<W>) -> Response {
-    let mut state = ctx.state.write().await;
-
-    // TODO: Actually start BLE advertising in Phase 3.
-    state.state = State::Advertising;
-    state.advertising_remaining = Some(timeout);
-
-    info!("Started advertising with timeout {}s", timeout);
-
-    Response::Ok(
-        OkResponse::new(State::Advertising)
-            .with_remaining(timeout)
-            .with_wifi_connected(state.wifi_connected),
-    )
+    if !(1..=300).contains(&timeout) {
+        return Response::Error(ErrorResponse::new("Setup timeout must be 1–300 seconds"));
+    }
+    change_window(Some(timeout), ctx).await
 }
 
-/// Handle the "stop" command - stop BLE advertising.
 async fn handle_stop<W: WifiManager>(ctx: &HandlerContext<W>) -> Response {
-    let mut state = ctx.state.write().await;
+    change_window(None, ctx).await
+}
 
-    // TODO: Actually stop BLE advertising in Phase 3.
-    state.state = State::Idle;
-    state.advertising_remaining = None;
-
-    info!("Stopped advertising");
-
-    Response::Ok(OkResponse::new(State::Idle).with_wifi_connected(state.wifi_connected))
+async fn change_window<W: WifiManager>(timeout: Option<u32>, ctx: &HandlerContext<W>) -> Response {
+    let (reply, result) = oneshot::channel();
+    if ctx
+        .control
+        .send(ControlRequest { timeout, reply })
+        .await
+        .is_err()
+    {
+        return Response::Error(ErrorResponse::new("BLE controller unavailable"));
+    }
+    match tokio::time::timeout(std::time::Duration::from_secs(5), result).await {
+        Ok(Ok(Ok(()))) => handle_status(ctx).await,
+        Ok(Ok(Err(message))) => Response::Error(ErrorResponse::new(message)),
+        _ => Response::Error(ErrorResponse::new("BLE controller did not respond")),
+    }
 }
 
 /// Handle the "status" command - return current daemon state.
@@ -227,9 +258,25 @@ mod tests {
     use crate::wifi::{MockWifiManager, WifiStatus};
 
     fn make_ctx(wifi: MockWifiManager) -> HandlerContext<MockWifiManager> {
+        let state = Arc::new(RwLock::new(DaemonState::default()));
+        let (control, mut requests) = mpsc::channel::<ControlRequest>(8);
+        let controller_state = Arc::clone(&state);
+        tokio::spawn(async move {
+            while let Some(request) = requests.recv().await {
+                let mut state = controller_state.write().await;
+                state.state = if request.timeout.is_some() {
+                    State::Advertising
+                } else {
+                    State::Idle
+                };
+                state.advertising_remaining = request.timeout;
+                let _ = request.reply.send(Ok(()));
+            }
+        });
         HandlerContext {
-            state: Arc::new(RwLock::new(DaemonState::default())),
+            state,
             wifi: Arc::new(wifi),
+            control,
         }
     }
 

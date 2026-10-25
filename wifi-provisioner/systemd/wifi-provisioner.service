@@ -1,7 +1,7 @@
 [Unit]
 Description=WiFi Provisioner BLE Daemon
 Documentation=https://www.improv-wifi.com/
-After=bluetooth.target network.target
+After=bluetooth.target network.target NetworkManager.service
 Wants=bluetooth.target
 
 [Service]
@@ -12,6 +12,7 @@ RestartSec=5
 
 # Logging.
 Environment=RUST_LOG=info
+EnvironmentFile=-/etc/default/wifi-provisioner
 
 # Security hardening.
 NoNewPrivileges=true

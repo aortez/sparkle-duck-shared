@@ -1,6 +1,30 @@
 # WiFi Provisioner
 
-**Status: Phase 1-5 complete, tested end-to-end on Pi**
+## Setup lifecycle
+
+The Improv service accepts credentials only during a setup window (maximum five
+minutes). A device without WiFi opens a window at daemon startup. A connected
+device starts closed. Timeout, Stop, and a successful connection unregister the
+BLE advertisement and reject further credential commands. An in-flight attempt
+is cancelled on Stop/expiry; a NetworkManager operation already submitted may
+still finish, so Stop is not a rollback of network changes.
+
+From the device's USB/SSH console, run `wifi-provisioner --start`, `--stop`, or
+`--status`. These commands use the existing loopback WebSocket API; browser
+Origins are rejected. Start/Stop replies follow the BLE controller operation.
+WiFi failure is notified to the client and allows retry within the remaining
+window. This is time-limited local provisioning, not an ownership/bonding system.
+
+Set `WIFI_PROVISIONER_WEB_PORT` in `/etc/default/wifi-provisioner` to select the
+post-setup web UI port. The shared default remains 8081; Inky Soup sets 8000.
+Passwords and raw credential packets are not logged, including at debug level.
+
+The hosted client at https://allan.pizza/setup/ sends credentials directly over
+Bluetooth, reports errors/timeouts, and polls state for older daemon versions.
+It does not store credentials or send them to a web server.
+
+The historical research and rollout checklist below describe the original design.
+
 
 A lightweight Bluetooth LE daemon for WiFi provisioning on Raspberry Pi. Implements the [Improv WiFi](https://www.improv-wifi.com/) protocol, allowing users to configure WiFi credentials from their phone without needing physical access to the device.
 
@@ -135,7 +159,7 @@ Considered Unix sockets, signals, HTTP. WebSocket selected for consistency with 
 2. Device boots, has no WiFi configured
 3. Daemon starts BLE advertising automatically
 4. User scans QR code on device (or follows printed instructions)
-5. QR code opens `https://allan.pizza/wifi` in Chrome
+5. QR code opens `https://allan.pizza/setup/` in Chrome
 6. User taps "Connect", Chrome shows Bluetooth device picker
 7. User selects their device (e.g., "DirtSim-A1B2")
 8. Page shows available WiFi networks
@@ -144,7 +168,7 @@ Considered Unix sockets, signals, HTTP. WebSocket selected for consistency with 
 
 ### Web Setup Page
 
-Hosted at `https://allan.pizza/wifi` using the [Improv WiFi JavaScript SDK](https://github.com/improv-wifi/sdk-ble-js).
+Hosted at `https://allan.pizza/setup/` using the [Improv WiFi JavaScript SDK](https://github.com/improv-wifi/sdk-ble-js).
 
 Single page works for all Sparkle Duck devices (dirtsim, inky-soup, etc.) — the Improv protocol handles device-specific info.
 
@@ -469,7 +493,7 @@ By implementing the standard Improv WiFi protocol, this daemon works with:
 
 | Client | Platform | Notes |
 |--------|----------|-------|
-| [allan.pizza/wifi](https://allan.pizza/wifi) | Chrome (Android/Desktop) | Our setup page (Phase 6) |
+| [allan.pizza/wifi](https://allan.pizza/setup/) | Chrome (Android/Desktop) | Our setup page (Phase 6) |
 | [Web Bluetooth Demo](https://jnthas.github.io/improv-wifi-demo/) | Chrome (Android/Desktop) | Third-party, good for testing |
 | [Home Assistant](https://www.home-assistant.io/integrations/improv_ble) | Any (with Bluetooth) | Auto-discovers devices |
 | [Android SDK Demo](https://github.com/improv-wifi/sdk-android) | Android | Build from source |

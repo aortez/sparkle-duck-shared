@@ -1,0 +1,254 @@
+[
+  {
+    "name": "Wi-Fi is authenticating",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:60 (connecting (need authentication))\nGENERAL.CONNECTION:Home\n",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": false,
+    "rescue_connected": false,
+    "keep_setup_open": true
+  },
+  {
+    "name": "Wi-Fi is waiting for DHCP",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:70 (connecting (getting IP configuration))\nGENERAL.CONNECTION:Home\n",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": false,
+    "rescue_connected": false,
+    "keep_setup_open": true
+  },
+  {
+    "name": "Activated without an address",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\n",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": false,
+    "rescue_connected": false,
+    "keep_setup_open": true
+  },
+  {
+    "name": "Only link-local IPv4",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\nIP4.ADDRESS[1]:169.254.2.3/16\n",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": false,
+    "rescue_connected": false,
+    "keep_setup_open": true
+  },
+  {
+    "name": "Only link-local IPv6",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\nIP6.ADDRESS[1]:fe80::123/64\n",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": false,
+    "rescue_connected": false,
+    "keep_setup_open": true
+  },
+  {
+    "name": "Only loopback address",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\nIP4.ADDRESS[1]:127.0.0.1/8\n",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": false,
+    "rescue_connected": false,
+    "keep_setup_open": true
+  },
+  {
+    "name": "Only unspecified address",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\nIP4.ADDRESS[1]:0.0.0.0/0\n",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": false,
+    "rescue_connected": false,
+    "keep_setup_open": true
+  },
+  {
+    "name": "Only multicast address",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\nIP4.ADDRESS[1]:224.0.0.1/24\n",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": false,
+    "rescue_connected": false,
+    "keep_setup_open": true
+  },
+  {
+    "name": "IPv4 LAN with carrier",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\nIP4.ADDRESS[1]:192.168.1.12/24\n",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": true,
+    "rescue_connected": true,
+    "keep_setup_open": false
+  },
+  {
+    "name": "IPv6 ULA with carrier",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\nIP6.ADDRESS[1]:fd12::123/64\n",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": true,
+    "rescue_connected": true,
+    "keep_setup_open": false
+  },
+  {
+    "name": "Escaped IPv6 ULA",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\nIP6.ADDRESS[1]:fd12\\:\\:123/64\n",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": true,
+    "rescue_connected": true,
+    "keep_setup_open": false
+  },
+  {
+    "name": "Address retained but carrier lost",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\nIP4.ADDRESS[1]:192.168.1.12/24\n",
+    "carrier": {
+      "wlan0": false
+    },
+    "wifi_connected": false,
+    "rescue_connected": false,
+    "keep_setup_open": true
+  },
+  {
+    "name": "Carrier unreadable",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\nIP4.ADDRESS[1]:192.168.1.12/24\n",
+    "carrier": {
+      "wlan0": null
+    },
+    "wifi_connected": null,
+    "rescue_connected": null,
+    "keep_setup_open": false
+  },
+  {
+    "name": "Malformed address",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\nIP4.ADDRESS[1]:not-an-address\n",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": null,
+    "rescue_connected": null,
+    "keep_setup_open": false
+  },
+  {
+    "name": "Disconnected",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:30 (disconnected)\nGENERAL.CONNECTION:Home\n",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": false,
+    "rescue_connected": false,
+    "keep_setup_open": true
+  },
+  {
+    "name": "USB alone permits Wi-Fi setup",
+    "output": "GENERAL.DEVICE:usb0\nGENERAL.TYPE:ethernet\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\nIP4.ADDRESS[1]:10.55.0.1/24\n",
+    "carrier": {
+      "usb0": true
+    },
+    "wifi_connected": false,
+    "rescue_connected": true,
+    "keep_setup_open": true
+  },
+  {
+    "name": "USB detached",
+    "output": "GENERAL.DEVICE:usb0\nGENERAL.TYPE:ethernet\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\nIP4.ADDRESS[1]:10.55.0.1/24\n",
+    "carrier": {
+      "usb0": false
+    },
+    "wifi_connected": false,
+    "rescue_connected": false,
+    "keep_setup_open": true
+  },
+  {
+    "name": "USB plus Wi-Fi waiting for DHCP",
+    "output": "GENERAL.DEVICE:usb0\nGENERAL.TYPE:ethernet\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\nIP4.ADDRESS[1]:10.55.0.1/24\n\nGENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:70 (connecting (getting IP configuration))\nGENERAL.CONNECTION:Home\n",
+    "carrier": {
+      "usb0": true,
+      "wlan0": true
+    },
+    "wifi_connected": false,
+    "rescue_connected": true,
+    "keep_setup_open": true
+  },
+  {
+    "name": "Loopback alone",
+    "output": "GENERAL.DEVICE:lo\nGENERAL.TYPE:loopback\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\nIP4.ADDRESS[1]:127.0.0.1/8\n",
+    "carrier": {
+      "lo": true
+    },
+    "wifi_connected": false,
+    "rescue_connected": false,
+    "keep_setup_open": true
+  },
+  {
+    "name": "Malformed device output",
+    "output": "unexpected output",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": null,
+    "rescue_connected": null,
+    "keep_setup_open": false
+  },
+  {
+    "name": "Missing state",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\n",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": null,
+    "rescue_connected": null,
+    "keep_setup_open": false
+  },
+  {
+    "name": "Missing type",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.STATE:100 (connected)\n",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": null,
+    "rescue_connected": null,
+    "keep_setup_open": false
+  },
+  {
+    "name": "Missing device",
+    "output": "GENERAL.TYPE:wifi\nGENERAL.STATE:100 (connected)\n",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": null,
+    "rescue_connected": null,
+    "keep_setup_open": false
+  },
+  {
+    "name": "Empty output",
+    "output": "",
+    "carrier": {
+      "wlan0": true
+    },
+    "wifi_connected": null,
+    "rescue_connected": null,
+    "keep_setup_open": false
+  },
+  {
+    "name": "Second Wi-Fi interface is usable",
+    "output": "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\nIP4.ADDRESS[1]:192.168.1.12/24\n\nGENERAL.DEVICE:wlan1\nGENERAL.TYPE:wifi\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Home\nIP4.ADDRESS[1]:192.168.1.12/24\n",
+    "carrier": {
+      "wlan0": null,
+      "wlan1": true
+    },
+    "wifi_connected": true,
+    "rescue_connected": true,
+    "keep_setup_open": false
+  }
+]

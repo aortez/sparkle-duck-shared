@@ -3,7 +3,7 @@
 //! Provides a trait-based abstraction for WiFi operations, with a real
 //! implementation using nmcli and a mock for testing.
 
-use std::process::Stdio;
+use std::{fs, net::IpAddr, process::Stdio};
 use tokio::process::Command;
 use tracing::{debug, error, info, warn};
 
@@ -79,6 +79,7 @@ impl NmcliWifiManager {
 
         let output = Command::new("nmcli")
             .kill_on_drop(true)
+            .env("LC_ALL", "C")
             .args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -104,19 +105,28 @@ impl Default for NmcliWifiManager {
 
 impl WifiManager for NmcliWifiManager {
     async fn status(&self) -> WifiResult<WifiStatus> {
-        // Check for active WiFi connections.
+        // An active connection profile can still be authenticating or waiting
+        // for DHCP. Only a usable WiFi link should close the startup BLE window.
         let output = self
             .run_nmcli(&[
                 "-t",
                 "-f",
-                "NAME,TYPE,DEVICE",
-                "connection",
+                "GENERAL.DEVICE,GENERAL.TYPE,GENERAL.STATE,GENERAL.CONNECTION,IP4.ADDRESS,IP6.ADDRESS",
+                "device",
                 "show",
-                "--active",
             ])
             .await?;
-
-        Ok(parse_active_connections(&output))
+        parse_device_status(&output, |device| {
+            if device.contains('/') || matches!(device, "." | "..") {
+                return Err(WifiError::ParseError("Invalid interface name".into()));
+            }
+            match fs::read_to_string(format!("/sys/class/net/{device}/carrier")) {
+                Ok(value) if value.trim() == "1" => Ok(true),
+                Ok(value) if value.trim() == "0" => Ok(false),
+                Ok(_) => Err(WifiError::ParseError("Invalid carrier status".into())),
+                Err(error) => Err(WifiError::CommandFailed(error.to_string())),
+            }
+        })
     }
 
     async fn scan(&self) -> WifiResult<Vec<Network>> {
@@ -187,23 +197,93 @@ fn parse_nmcli_fields(line: &str) -> Vec<String> {
     fields
 }
 
-fn parse_active_connections(output: &str) -> WifiStatus {
-    for line in output.lines() {
-        let parts = parse_nmcli_fields(line);
-        if parts.len() >= 2 && parts[1] == "802-11-wireless" {
-            let ssid = parts[0].to_string();
-            info!("WiFi connected to: {}", ssid);
-            return WifiStatus {
-                connected: true,
-                ssid: Some(ssid),
-            };
+/// Device records are blank-line separated. Values can contain unescaped colons
+/// (IPv6) as well as nmcli's escaped separators (connection names).
+fn parse_device_status(
+    output: &str,
+    mut carrier: impl FnMut(&str) -> WifiResult<bool>,
+) -> WifiResult<WifiStatus> {
+    let mut uncertainty = None;
+    for block in output.trim().split("\n\n") {
+        let fields: Vec<_> = block
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .collect();
+        let get = |key| fields.iter().find(|(k, _)| *k == key).map(|(_, v)| *v);
+        let device =
+            get("GENERAL.DEVICE").ok_or_else(|| WifiError::ParseError("Missing device".into()))?;
+        let kind = get("GENERAL.TYPE")
+            .ok_or_else(|| WifiError::ParseError("Missing device type".into()))?;
+        // USB Ethernet must not prevent WiFi provisioning.
+        if kind != "wifi" {
+            continue;
+        }
+        let state = get("GENERAL.STATE")
+            .and_then(|value| value.split_whitespace().next())
+            .and_then(|value| value.parse::<u16>().ok())
+            .ok_or_else(|| WifiError::ParseError("Missing device state".into()))?;
+        if state != 100 {
+            continue;
+        }
+        let has_address = fields.iter().any(|(key, value)| {
+            if !key.starts_with("IP4.ADDRESS[") && !key.starts_with("IP6.ADDRESS[") {
+                return false;
+            }
+            let address = unescape_value(value.split('/').next().unwrap_or(""));
+            match address.parse::<IpAddr>() {
+                Ok(IpAddr::V4(ip)) => {
+                    !ip.is_loopback()
+                        && !ip.is_link_local()
+                        && !ip.is_unspecified()
+                        && !ip.is_multicast()
+                }
+                Ok(IpAddr::V6(ip)) => {
+                    !ip.is_loopback()
+                        && !ip.is_unicast_link_local()
+                        && !ip.is_unspecified()
+                        && !ip.is_multicast()
+                }
+                Err(_) => {
+                    uncertainty = Some(WifiError::ParseError("Invalid device address".into()));
+                    false
+                }
+            }
+        });
+        if has_address {
+            match carrier(device) {
+                Ok(true) => {
+                    return Ok(WifiStatus {
+                        connected: true,
+                        ssid: get("GENERAL.CONNECTION")
+                            .filter(|value| *value != "--")
+                            .map(unescape_value),
+                    })
+                }
+                Ok(false) => {}
+                Err(error) => uncertainty = Some(error),
+            }
         }
     }
-    info!("WiFi not connected");
-    WifiStatus {
-        connected: false,
-        ssid: None,
+    match uncertainty {
+        Some(error) => Err(error),
+        None => Ok(WifiStatus {
+            connected: false,
+            ssid: None,
+        }),
     }
+}
+
+fn unescape_value(value: &str) -> String {
+    let mut result = String::new();
+    let mut chars = value.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            result.push(chars.next().unwrap_or('\\'));
+        } else {
+            result.push(ch);
+        }
+    }
+    result
 }
 
 /// Parse nmcli wifi list output into Network structs.
@@ -334,12 +414,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn connected_profile_with_escaped_name_stays_connected() {
-        let status = parse_active_connections(
-            "USB:802-3-ethernet:usb0\nStudio\\:West\\\\Frame:802-11-wireless:wlan0\n",
-        );
+    fn usable_wifi_with_escaped_name_stays_connected() {
+        let output = "GENERAL.DEVICE:wlan0\nGENERAL.TYPE:wifi\nGENERAL.STATE:100 (connected)\nGENERAL.CONNECTION:Studio\\:West\\\\Frame\nIP4.ADDRESS[1]:192.168.1.2/24\n";
+        let status = parse_device_status(output, |_| Ok(true)).unwrap();
         assert!(status.connected);
         assert_eq!(status.ssid.as_deref(), Some("Studio:West\\Frame"));
+    }
+
+    #[test]
+    fn startup_setup_stays_open_until_wifi_has_a_usable_address_and_carrier() {
+        let cases: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/connectivity.json")).unwrap();
+        for case in cases.as_array().unwrap() {
+            let status = parse_device_status(case["output"].as_str().unwrap(), |device| match case
+                ["carrier"][device]
+                .as_bool()
+            {
+                Some(up) => Ok(up),
+                None => Err(WifiError::CommandFailed("carrier unavailable".into())),
+            });
+            if case["wifi_connected"].is_null() {
+                assert!(status.is_err(), "{}", case["name"]);
+            } else {
+                let connected = status.unwrap().connected;
+                assert_eq!(
+                    connected,
+                    case["wifi_connected"].as_bool().unwrap(),
+                    "{}",
+                    case["name"]
+                );
+                // main.rs opens startup setup when !connected; ble.rs closes
+                // that window only after a status report changes to connected.
+                if case["keep_setup_open"] == true {
+                    assert!(!connected, "{}", case["name"]);
+                }
+            }
+        }
     }
 
     #[test]
